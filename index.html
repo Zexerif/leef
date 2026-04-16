@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Leef Browser</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+  <div class="browser-top">
+    <div class="nav-row">
+      <div class="brand">
+        <svg class="brand-icon" viewBox="0 0 24 24"><path d="M17,8C8,10 5.9,16.17 3.82,21.34L5.71,22L6.66,19.7C7.14,19.87 7.64,20 8,20C19,20 22,3 22,3C21,5 14,5.25 9,6.25C4,7.25 7.05,10.67 6,12C4.19,14.3 3.96,16.92 3.65,19.25C5.81,13.84 8.4,9.65 17,8Z" /></svg>
+        Leef
+      </div>
+      
+      <div class="nav-buttons">
+        <button class="nav-btn" id="btn-back">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+        </button>
+        <button class="nav-btn" id="btn-forward">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+        </button>
+        <button class="nav-btn" id="btn-refresh">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+        </button>
+      </div>
+
+      <div class="address-bar-container">
+        <svg class="globe-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+        <input type="text" id="address-input" placeholder="Search or enter web address">
+      </div>
+
+      <div class="actions" style="position: relative;">
+        <button class="action-btn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>
+        <button class="action-btn" id="btn-bookmarks"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg></button>
+        <button class="action-btn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg></button>
+        <img src="https://images.unsplash.com/photo-1531123897727-8f129e1688ce?w=100&h=100&fit=crop" alt="User" class="avatar" id="btn-settings" style="cursor: pointer;">
+        
+        <div id="bookmarks-dropdown" class="bookmarks-dropdown" style="display: none;">
+          <div class="bookmarks-header">
+            <h3>Bookmarks</h3>
+            <button id="btn-add-bookmark">+ Add Currrent Tab</button>
+          </div>
+          <div id="bookmarks-list">
+            <!-- Bookmarks injected here -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabs-row" id="tabs-container">
+      <!-- Tabs will be injected here -->
+      <button class="new-tab-btn" id="btn-new-tab">+</button>
+    </div>
+  </div>
+
+  <div class="main-content">
+    
+    <!-- Home Layout -->
+    <div class="home-layout" id="home-view">
+      <div class="news-section">
+        <h1>Leef News</h1>
+        <div id="dynamic-news-container">
+          <p style="opacity: 0.6; font-family: var(--font-sans)">Loading latest news...</p>
+        </div>
+      </div>
+
+      <div class="hub-section">
+        <h1>Leef Hub</h1>
+        <div class="hub-grid">
+          <div class="hub-tile hub-tile-amazon" data-url="https://amazon.com">Amazon</div>
+          <div class="hub-tile hub-tile-netflix" data-url="https://netflix.com">Netflix</div>
+          <div class="hub-tile hub-tile-x" data-url="https://twitter.com">
+            <div>X</div>
+            <div class="small-text">Formerly Twitter</div>
+          </div>
+          <div class="hub-tile hub-tile-facebook" data-url="https://facebook.com">Facebook</div>
+          <div class="hub-tile hub-tile-youtube" data-url="https://youtube.com">Youtube</div>
+          <div class="hub-tile hub-tile-discord" data-url="https://discord.com">Discord</div>
+          <div class="hub-tile hub-tile-disney" data-url="https://disneyplus.com">Disney +</div>
+          <div class="hub-tile hub-tile-add">
+            <b>+</b> Add More
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-logo">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <svg class="brand-icon" viewBox="0 0 24 24" style="height: 32px;"><path d="M17,8C8,10 5.9,16.17 3.82,21.34L5.71,22L6.66,19.7C7.14,19.87 7.64,20 8,20C19,20 22,3 22,3C21,5 14,5.25 9,6.25C4,7.25 7.05,10.67 6,12C4.19,14.3 3.96,16.92 3.65,19.25C5.81,13.84 8.4,9.65 17,8Z" /></svg>
+          Leef
+        </div>
+        <button id="btn-whats-new" class="nav-btn" style="width: auto; padding: 5px 15px; font-size: 0.9rem; border-radius: 20px; font-weight: 500;">What's New</button>
+      </div>
+    </div>
+
+    <!-- Changelog Layout -->
+    <div class="changelog-layout" id="changelog-view" style="display: none;">
+      <div class="changelog-content">
+        <h1>What's New in Leef</h1>
+        <p class="changelog-subtitle">Discover the latest updates and improvements</p>
+        
+        <div class="update-card">
+          <div class="update-date">April 16, 2026</div>
+          <h2>Persistent Local Memory & Bookmarks!</h2>
+          <ul>
+            <li><strong>Privacy Policy Upgrade:</strong> We've successfully disabled the strict "in-memory-only" restriction to allow core browser functionalities like Cache, IndexedDB, LocalStorage, and explicitly Bookmarks to securely persist across reboots onto your local storage.</li>
+            <li><strong>Bookmarks System:</strong> Added a gorgeous new "Add to Bookmarks" dropdown menu tied to the Star icon, which successfully grabs site context, pulls Google Favicons, and manages routing.</li>
+          </ul>
+        </div>
+        
+        <div class="update-card">
+          <div class="update-date">April 16, 2026</div>
+          <h2>Dynamic RSS News Feed</h2>
+          <ul>
+            <li><strong>Live News Delivery:</strong> Using internal HTTPS routing inside Electron's Node layer to securely intercept Yahoo RSS feeds without triggering CORS flags.</li>
+            <li><strong>Style Fixes:</strong> Fixed alignment padding around the News module containers, resolving broken interactive layouts alongside restoring classic OS typography specifically to the underlying Leef Home Dashboard layout.</li>
+          </ul>
+        </div>
+
+        <div class="update-card">
+          <div class="update-date">April 15, 2026</div>
+          <h2>Initial Alpha Build</h2>
+          <ul>
+            <li>Implemented infinite tabs with internal Chromium Webviews.</li>
+            <li>Set up comprehensive Settings menus targeting standard web tracking restrictions.</li>
+            <li>Applied full custom modern styling architecture.</li>
+          </ul>
+        </div>
+        
+      </div>
+    </div>
+
+    <!-- Settings Layout -->
+    <div class="settings-layout" id="settings-view" style="display: none;">
+      <div class="settings-sidebar">
+        <h2>Settings</h2>
+        <ul class="settings-nav">
+          <li class="active" data-section="sec-general">General</li>
+          <li data-section="sec-appearance">Appearance</li>
+          <li data-section="sec-privacy">Privacy & Security</li>
+          <li data-section="sec-performance">Performance</li>
+          <li data-section="sec-notifications">Notifications</li>
+          <li data-section="sec-downloads">Downloads</li>
+          <li data-section="sec-advanced">Advanced</li>
+        </ul>
+      </div>
+
+      <div class="settings-content-area">
+        
+        <!-- General -->
+        <div class="settings-section active" id="sec-general">
+          <h1>General</h1>
+          
+          <div class="setting-group">
+            <h3>Startup behavior</h3>
+            <label><input type="radio" name="startup" value="newtab" checked> Open the New Tab page</label>
+            <label><input type="radio" name="startup" value="continue"> Continue where you left off</label>
+            <label><input type="radio" name="startup" value="homepage"> Open the home page</label>
+          </div>
+
+          <div class="setting-group">
+            <h3>Default browser</h3>
+            <p>Make Leef your default browser</p>
+            <button class="settings-btn" id="btn-default-browser">Make default</button>
+          </div>
+
+          <div class="setting-group">
+            <h3>Search Engine</h3>
+            <label for="search-engine-select">Search engine used in the address bar:</label>
+            <select id="search-engine-select">
+              <option value="https://www.google.com/search?q=">Google</option>
+              <option value="https://duckduckgo.com/?q=">DuckDuckGo</option>
+              <option value="https://www.bing.com/search?q=">Bing</option>
+            </select>
+          </div>
+
+          <div class="setting-group">
+            <h3>Language</h3>
+            <select id="language-select">
+              <option value="en">English</option>
+              <option value="fr">French</option>
+              <option value="es">Spanish</option>
+              <option value="it">Italian</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Appearance -->
+        <div class="settings-section" id="sec-appearance">
+          <h1>Appearance</h1>
+          <div class="setting-group">
+            <h3>Page Zoom</h3>
+            <select id="zoom-select">
+              <option value="0.8">80%</option>
+              <option value="0.9">90%</option>
+              <option value="1.0" selected>100%</option>
+              <option value="1.1">110%</option>
+              <option value="1.25">125%</option>
+              <option value="1.5">150%</option>
+            </select>
+          </div>
+          <div class="setting-group">
+            <h3>Font Size</h3>
+            <select id="font-size-select">
+              <option value="small">Small</option>
+              <option value="medium" selected>Medium</option>
+              <option value="large">Large</option>
+              <option value="very-large">Very Large</option>
+            </select>
+          </div>
+          <div class="setting-group">
+            <h3>Custom New Tab Page</h3>
+            <input type="text" id="custom-new-tab" placeholder="e.g. https://google.com">
+          </div>
+        </div>
+
+        <!-- Privacy -->
+        <div class="settings-section" id="sec-privacy">
+          <h1>Privacy & Security</h1>
+          <div class="setting-group">
+            <h3>Clear browsing data</h3>
+            <p>Clear history, cookies, cache, and more</p>
+            <button class="settings-btn btn-danger" id="btn-clear-data">Clear Data Now</button>
+          </div>
+          <div class="setting-group">
+            <h3>Tracking Protection</h3>
+            <label><input type="radio" name="tracking" value="standard" checked> Standard</label>
+            <label><input type="radio" name="tracking" value="strict"> Strict</label>
+            <label><input type="radio" name="tracking" value="custom"> Custom</label>
+          </div>
+          <div class="setting-group toggle-group">
+            <div>
+              <h3>HTTPS-only mode</h3>
+              <p>Automatically upgrade all connections to secure HTTPS</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="https-only" checked><span class="slider"></span></label>
+          </div>
+          <div class="setting-group toggle-group">
+            <div>
+              <h3>Ad & Tracker Blocking</h3>
+              <p>Block aggressive ads and hidden trackers</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="ad-blocker" checked><span class="slider"></span></label>
+          </div>
+          <div class="setting-group">
+            <h3>Site Permissions</h3>
+            <button class="settings-btn">Manage Camera & Microphone</button>
+            <button class="settings-btn">Location Settings</button>
+          </div>
+        </div>
+
+        <!-- Performance -->
+        <div class="settings-section" id="sec-performance">
+          <h1>Performance</h1>
+          <div class="setting-group toggle-group">
+            <div>
+              <h3>Background activity limits</h3>
+              <p>Suspend inactive tabs to save memory</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="background-limit" checked><span class="slider"></span></label>
+          </div>
+        </div>
+
+        <!-- Notifications -->
+        <div class="settings-section" id="sec-notifications">
+          <h1>Notifications</h1>
+          <div class="setting-group toggle-group">
+            <div>
+              <h3>Master Notification Toggle</h3>
+              <p>Allow websites to ask for notification permissions</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="allow-notifications" checked><span class="slider"></span></label>
+          </div>
+          <div class="setting-group">
+            <h3>Per-site Control</h3>
+            <button class="settings-btn">Manage Allowed Sites</button>
+          </div>
+        </div>
+
+        <!-- Downloads -->
+        <div class="settings-section" id="sec-downloads">
+          <h1>Downloads</h1>
+          <div class="setting-group">
+            <h3>Default location</h3>
+            <div style="display:flex; gap: 10px;">
+              <input type="text" id="download-path" readonly value="C:\Users\quinn\Downloads">
+              <button class="settings-btn" id="btn-change-download">Change</button>
+            </div>
+          </div>
+          <div class="setting-group toggle-group">
+            <div>
+              <h3>Ask where to save</h3>
+              <p>Prompt for location before downloading each file</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="ask-download"><span class="slider"></span></label>
+          </div>
+        </div>
+
+        <!-- Advanced -->
+        <div class="settings-section" id="sec-advanced">
+          <h1>Advanced</h1>
+          <div class="setting-group">
+            <h3>Custom User Agent</h3>
+            <input type="text" id="custom-ua" placeholder="Mozilla/5.0...">
+          </div>
+          <div class="setting-group toggle-group">
+            <div>
+              <h3>DNS over HTTPS</h3>
+              <p>Use secure DNS for privacy</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="doh-toggle"><span class="slider"></span></label>
+          </div>
+          <div class="setting-group">
+            <h3>Proxy Settings</h3>
+            <input type="text" id="proxy-url" placeholder="http://proxy:8080">
+          </div>
+          <div class="setting-group">
+            <h3>Developer Tools</h3>
+            <button class="settings-btn" id="btn-flags">Experimental Flags</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Webviews Container -->
+    <div class="webview-container" id="webviews-container">
+      <!-- Webviews will be injected here -->
+    </div>
+
+  </div>
+
+  <script type="module" src="./renderer.js"></script>
+</body>
+</html>
