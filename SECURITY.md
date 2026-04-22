@@ -15,7 +15,7 @@ The following versions of Leef Browser currently receive security updates:
 We take security seriously. If you discover a vulnerability in Leef Browser, **please do not open a public GitHub issue**.
 
 Instead, report it privately so we can address it before public disclosure:
-
+- **Email:** contact.qtech@proton.me
 - **GitHub:** Use [GitHub's private vulnerability reporting](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing/privately-reporting-a-security-vulnerability) on this repository
 
 ### What to include
