@@ -12,6 +12,9 @@ Leef is actively maintained with security updates and a clear response policy â€
 are issued within 14 days of a verified report. If you discover a vulnerability, please report
 it. See [SECURITY](SECURITY.md) for full details.
 
+## Socials
+- **Bluesky:** [leefbrowser](https://bsky.app/profile/leefbrowser.bsky.social) (Check here for updates on development and such)
+- **Also Bluesky:** [QTech](https://bsky.app/profile/qtech.bsky.social)
 
 ## Download
 1. Go to the [Releases](https://github.com/Zexerif/leef/releases) page.
