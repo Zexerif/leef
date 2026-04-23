@@ -18,14 +18,14 @@ it. See [SECURITY](SECURITY.md) for full details.
 - **Also Bluesky:** [QTech](https://bsky.app/profile/qtech.bsky.social)
 
 ## Download
-1. Go to the [Releases](https://github.com/Zexerif/leef/releases) page.
+1. Go to the [Releases](https://github.com/git-QTech/leef/releases) page.
 2. Download the latest `.exe` installer and run it.
 
 > [!NOTE]
 > You may see a "Windows protected your PC" SmartScreen warning on first run. Click **More Info → Run Anyway** to proceed.
 
 ## Build from Source
-1. Clone the repo: `git clone https://github.com/Zexerif/leef.git`
+1. Clone the repo: `git clone https://github.com/git-QTech/leef.git`
 2. Install dependencies: `npm install`
 3. Run in dev mode: `npm start`
 4. Build installer: `npm run dist`
