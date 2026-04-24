@@ -1,6 +1,9 @@
 import { app, BrowserWindow, session, ipcMain, Menu, MenuItem, clipboard, nativeImage } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
+import { ElectronBlocker } from '@ghostery/adblocker-electron';
+import fetch from 'cross-fetch';
 
 // SET IDENTITY AS EARLY AS POSSIBLE (Critical for Windows Taskbar)
 app.name = 'Leef Browser';
@@ -22,6 +25,65 @@ app.commandLine.appendSwitch('disable-direct-composition');
 app.commandLine.appendSwitch('disable-gpu-driver-bug-workarounds');
 
 let mainWindow;
+let blocker;
+
+async function initAdBlocker(enabled = false) {
+  if (!enabled) {
+    if (blocker) blocker.disableBlockingInSession(session.fromPartition('persist:leef-session'));
+    return;
+  }
+
+  const sess = session.fromPartition('persist:leef-session');
+  const cachePath = path.join(app.getPath('userData'), 'adblock-engine.bin');
+
+  try {
+    // Attempt to load from local cache first (0 external calls)
+    if (fs.existsSync(cachePath)) {
+      blocker = await ElectronBlocker.deserialize(fs.readFileSync(cachePath));
+      console.log('AdBlocker loaded from cache.');
+    } else {
+      // First run: Download and compile (Explicit external call)
+      console.log('AdBlocker: Compiling engine (First run)...');
+      if (mainWindow) mainWindow.webContents.send('adblock-status', 'syncing');
+      blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch);
+      fs.writeFileSync(cachePath, blocker.serialize());
+      if (mainWindow) mainWindow.webContents.send('adblock-status', 'updated');
+    }
+    blocker.enableBlockingInSession(sess);
+  } catch (err) {
+    console.error('AdBlocker error:', err);
+    if (mainWindow) mainWindow.webContents.send('adblock-status', 'error');
+  }
+}
+
+async function checkForUpdates(manual = false) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+    const currentVersion = pkg.version;
+    
+    const response = await fetch('https://api.github.com/repos/git-QTech/leef/releases/latest', {
+      headers: { 'User-Agent': 'Leef-Browser-Update-Checker' }
+    });
+    
+    if (!response.ok) throw new Error('GitHub API reached limit or failed');
+    
+    const data = await response.json();
+    const latestTag = data.tag_name; // e.g., "v0.1.6" or "Alpha"
+    const latestVersion = latestTag.replace('v', ''); // for semver-ish comparison
+
+    if (latestVersion !== currentVersion) {
+      if (mainWindow) mainWindow.webContents.send('update-available', { 
+        version: latestVersion, 
+        tag: latestTag 
+      });
+    } else if (manual) {
+      if (mainWindow) mainWindow.webContents.send('update-available', 'none');
+    }
+  } catch (err) {
+    console.error('Update check failed:', err);
+    if (manual && mainWindow) mainWindow.webContents.send('update-available', 'error');
+  }
+}
 
 function createWindow() {
   // Use pure in-memory partition for privacy
@@ -89,10 +151,19 @@ ipcMain.on('apply-settings', (event, settings) => {
   const ua = settings.customUa || sess.getUserAgent().replace(/Electron\/[0-9.]+\s/g, '');
   sess.setUserAgent(ua, acceptLang);
 
-  // Language headers — remove old handler first to prevent stacking
+  // Header Sanitization & Language — remove old handler first to prevent stacking
   sess.webRequest.onBeforeSendHeaders(null);
   sess.webRequest.onBeforeSendHeaders((details, callback) => {
     details.requestHeaders['Accept-Language'] = acceptLang;
+
+    // Explicitly strip SafeSearch enforcement headers that can be injected by proxies/blockers
+    delete details.requestHeaders['X-SafeSearch-Enforced'];
+    delete details.requestHeaders['X-Google-SafeSearch'];
+    delete details.requestHeaders['X-Youtube-Edu-Filter'];
+    delete details.requestHeaders['YouTube-Restrict'];
+    delete details.requestHeaders['Prefer-Safe-Smart-Search'];
+    delete details.requestHeaders['Google-Safe-Search'];
+
     callback({ requestHeaders: details.requestHeaders });
   });
 
@@ -107,8 +178,8 @@ ipcMain.on('apply-settings', (event, settings) => {
       return callback({ redirectURL: url.replace(/^http:\/\//, 'https://') });
     }
 
-    // Ad / tracker blocking
-    if (settings.adBlocker || settings.tracking === 'strict') {
+    // Basic Ad / tracker blocking (Standard Tier)
+    if (settings.adBlockerMode === 'basic' || settings.tracking === 'strict') {
       try {
         const host = new URL(url).hostname;
         if (blockList.some(domain => host.includes(domain))) {
@@ -117,21 +188,43 @@ ipcMain.on('apply-settings', (event, settings) => {
       } catch (e) {}
     }
 
-    // AI Overview Blocking - Secure Network Layer Redirection (v0.1.4)
-    if (settings.blockAIOverview) {
-      try {
-        const parsedUrl = new URL(url);
-        // Ensure we only touch actual Google searches with valid protocols
-        const isSafeProtocol = parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:';
-        if (isSafeProtocol && parsedUrl.hostname.includes('google.com') && parsedUrl.pathname.startsWith('/search')) {
+    // AI Overview Blocking & Region Independence (v0.1.5)
+    try {
+      const parsedUrl = new URL(url);
+      const isSafeProtocol = parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:';
+      
+      if (isSafeProtocol && parsedUrl.hostname.includes('google.com') && parsedUrl.pathname.startsWith('/search')) {
+        let changed = false;
+
+        // 1. Force SafeSearch Off (Leef Labs: Region Independence)
+        if (settings.labs?.force_safe_off) {
+          if (parsedUrl.searchParams.get('safe') !== 'off') {
+            parsedUrl.searchParams.set('safe', 'off');
+            changed = true;
+          }
+        } else {
+          // Standard: Strip active/strict if they were forced
+          const safeVal = parsedUrl.searchParams.get('safe');
+          if (safeVal === 'active' || safeVal === 'strict') {
+            parsedUrl.searchParams.delete('safe');
+            changed = true;
+          }
+        }
+
+        // 2. AI Overview Blocking
+        if (settings.blockAIOverview) {
           let query = parsedUrl.searchParams.get('q');
           if (query && !query.toLowerCase().includes('-noai')) {
             parsedUrl.searchParams.set('q', query + ' -noai');
-            return callback({ redirectURL: parsedUrl.toString() });
+            changed = true;
           }
         }
-      } catch (e) {}
-    }
+
+        if (changed) {
+          return callback({ redirectURL: parsedUrl.toString() });
+        }
+      }
+    } catch (e) {}
 
     callback({ cancel: false });
   });
@@ -145,17 +238,64 @@ ipcMain.on('apply-settings', (event, settings) => {
     }
   });
 
-  // Downloads — "Ask where to save" prompt
-  sess.removeAllListeners('will-download');
+  // Unified Download Manager (v0.1.5)
   sess.on('will-download', (event, item) => {
+    const filename = item.getFilename();
+    const totalBytes = item.getTotalBytes();
+    
     if (settings.askDownload) {
       item.setSaveDialogOptions({
         title: 'Save File',
-        defaultPath: item.getFilename(),
+        defaultPath: filename,
         buttonLabel: 'Save'
       });
     }
+
+    // Send initial "started" event
+    if (mainWindow) {
+      mainWindow.webContents.send('download-status', {
+        id: item.getStartTime(),
+        name: filename,
+        status: 'started',
+        total: totalBytes
+      });
+    }
+
+    item.on('updated', (event, state) => {
+      if (state === 'interrupted') {
+        if (mainWindow) mainWindow.webContents.send('download-status', { id: item.getStartTime(), status: 'interrupted' });
+      } else if (state === 'progressing') {
+        if (item.isPaused()) {
+          if (mainWindow) mainWindow.webContents.send('download-status', { id: item.getStartTime(), status: 'paused' });
+        } else {
+          if (mainWindow) {
+            mainWindow.webContents.send('download-status', {
+              id: item.getStartTime(),
+              received: item.getReceivedBytes(),
+              status: 'progressing'
+            });
+          }
+        }
+      }
+    });
+
+    item.once('done', (event, state) => {
+      if (state === 'completed') {
+        if (mainWindow) {
+          mainWindow.webContents.send('download-status', {
+            id: item.getStartTime(),
+            status: 'completed',
+            path: item.getSavePath()
+          });
+        }
+      } else {
+        if (mainWindow) mainWindow.webContents.send('download-status', { id: item.getStartTime(), status: 'failed' });
+      }
+    });
   });
+
+  // Pro AdBlocker Toggle (Comprehensive Tier)
+  initAdBlocker(settings.adBlockerMode === 'comprehensive');
 
   // Proxy Settings
   if (settings.proxyUrl) {
@@ -165,8 +305,35 @@ ipcMain.on('apply-settings', (event, settings) => {
   }
 });
 
+ipcMain.on('manual-update-check', () => {
+  checkForUpdates(true);
+});
+
+ipcMain.on('refresh-adblock', () => {
+  const cachePath = path.join(app.getPath('userData'), 'adblock-engine.bin');
+  if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath);
+  initAdBlocker(true);
+});
+
 ipcMain.on('show-context-menu', (event, params) => {
   const menu = new Menu();
+
+  // Navigation Group
+  menu.append(new MenuItem({
+    label: 'Back',
+    enabled: params.editFlags.canGoBack || params.canGoBack,
+    click: () => event.sender.send('context-menu-command', { command: 'go-back' })
+  }));
+  menu.append(new MenuItem({
+    label: 'Forward',
+    enabled: params.editFlags.canGoForward || params.canGoForward,
+    click: () => event.sender.send('context-menu-command', { command: 'go-forward' })
+  }));
+  menu.append(new MenuItem({
+    label: 'Reload',
+    click: () => event.sender.send('context-menu-command', { command: 'reload' })
+  }));
+  menu.append(new MenuItem({ type: 'separator' }));
 
   // Link actions
   if (params.linkURL) {
@@ -182,20 +349,37 @@ ipcMain.on('show-context-menu', (event, params) => {
   }
 
   // Image actions
-  if (params.hasImageContents || (params.mediaType === 'image')) {
+  if (params.hasImageContents || params.mediaType === 'image') {
+    menu.append(new MenuItem({
+      label: 'Open Image in New Tab',
+      click: () => event.sender.send('context-menu-command', { command: 'create-tab', url: params.srcURL })
+    }));
     menu.append(new MenuItem({
       label: 'Copy Image',
       click: () => event.sender.send('context-menu-command', { command: 'copy-image', x: params.x, y: params.y })
+    }));
+    menu.append(new MenuItem({
+      label: 'Copy Image Address',
+      click: () => clipboard.writeText(params.srcURL)
     }));
     menu.append(new MenuItem({ type: 'separator' }));
   }
 
   // Text selection actions
   if (params.selectionText) {
+    const cleanText = params.selectionText.trim();
+    const displaySelection = cleanText.length > 15 ? cleanText.substring(0, 15) + '...' : cleanText;
+    
+    menu.append(new MenuItem({
+      label: `Search Google for "${displaySelection}"`,
+      click: () => event.sender.send('context-menu-command', { command: 'search-google', text: cleanText })
+    }));
+    menu.append(new MenuItem({ type: 'separator' }));
+    
     menu.append(new MenuItem({ label: 'Copy', role: 'copy' }));
     menu.append(new MenuItem({
       label: 'Raw Copy (No formatting)',
-      click: () => clipboard.writeText(params.selectionText)
+      click: () => clipboard.writeText(cleanText)
     }));
     menu.append(new MenuItem({ type: 'separator' }));
   }
@@ -203,35 +387,50 @@ ipcMain.on('show-context-menu', (event, params) => {
   // Input actions (if editable)
   if (params.isEditable) {
     menu.append(new MenuItem({ label: 'Cut', role: 'cut' }));
+    menu.append(new MenuItem({ label: 'Copy', role: 'copy' }));
     menu.append(new MenuItem({ label: 'Paste', role: 'paste' }));
+    menu.append(new MenuItem({ type: 'separator' }));
     menu.append(new MenuItem({ label: 'Select All', role: 'selectAll' }));
     menu.append(new MenuItem({ type: 'separator' }));
   }
 
-  // Standard Navigation
-  menu.append(new MenuItem({
-    label: 'Back',
-    enabled: params.editFlags.canGoBack || params.canGoBack,
-    click: () => event.sender.send('context-menu-command', { command: 'go-back' })
-  }));
-  menu.append(new MenuItem({
-    label: 'Forward',
-    enabled: params.editFlags.canGoForward || params.canGoForward,
-    click: () => event.sender.send('context-menu-command', { command: 'go-forward' })
-  }));
-  menu.append(new MenuItem({
-    label: 'Reload',
-    click: () => event.sender.send('context-menu-command', { command: 'reload' })
-  }));
+  // Page Global Actions
+  if (!params.selectionText && !params.linkURL && !params.mediaType) {
+    menu.append(new MenuItem({
+      label: 'Save Page As...',
+      click: () => event.sender.send('context-menu-command', { command: 'save-page' })
+    }));
+    menu.append(new MenuItem({
+      label: 'Print...',
+      click: () => event.sender.send('context-menu-command', { command: 'print' })
+    }));
+    menu.append(new MenuItem({ type: 'separator' }));
+    menu.append(new MenuItem({
+      label: 'View Page Source',
+      click: () => event.sender.send('context-menu-command', { command: 'view-source' })
+    }));
+  }
 
-  menu.append(new MenuItem({ type: 'separator' }));
   menu.append(new MenuItem({
     label: 'Inspect Element',
-    click: () => event.sender.inspectElement(params.x, params.y)
+    click: () => {
+      event.sender.inspectElement(params.x, params.y);
+      if (event.sender.isDevToolsOpened()) {
+        event.sender.devToolsWebContents.focus();
+      }
+    }
   }));
 
   const win = BrowserWindow.fromWebContents(event.sender);
   menu.popup({ window: win });
+});
+
+ipcMain.on('show-item-in-folder', (event, path) => {
+  if (path) require('electron').shell.showItemInFolder(path);
+});
+
+ipcMain.on('manual-update-check', () => {
+  checkForUpdates(true);
 });
 
 ipcMain.on('clear-data', async () => {
@@ -245,9 +444,54 @@ ipcMain.on('set-default-browser', () => {
   app.setAsDefaultProtocolClient('https');
 });
 
+app.on('web-contents-created', (event, contents) => {
+  const handleWindowOpen = ({ url, features, disposition }) => {
+    // 1. Detect if this is a legitimate popup (typical for Login/OAuth)
+    // - Features present (width/height defined by site)
+    // - Specific identity provider domains
+    const isPopup = (features && features.length > 0);
+    const isAuth = url.includes('accounts.google.com') || 
+                   url.includes('facebook.com/dialog/oauth') || 
+                   url.includes('github.com/login/oauth') ||
+                   url.includes('auth.services.adobe.com');
 
-app.whenReady().then(() => {
+    if (isPopup || isAuth) {
+      console.log('Allowing themed popup for:', url);
+      return { 
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          backgroundColor: '#1c1c1c',
+          icon: path.join(__dirname, 'images/icon.png')
+          // Note: titleBarOverlay doesn't apply to native popups easily, 
+          // but we can set the background to match.
+        }
+      };
+    }
+
+    // 2. Default: Treat as a standard link and open in a Leef Tab
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('open-new-tab', url);
+    }
+    return { action: 'deny' };
+  };
+
+  contents.setWindowOpenHandler(handleWindowOpen);
+
+  // Explicitly enforce tab redirection on Webviews (Electron 30+ strict requirement)
+  contents.on('did-attach-webview', (e, webContents) => {
+    webContents.setWindowOpenHandler(handleWindowOpen);
+  });
+});
+
+app.whenReady().then(async () => {
   createWindow();
+
+  // Load initial adblocker if enabled in local storage (simplified for main process)
+  // We'll wait for the renderer to apply-settings on boot, but we can check for updates
+  setTimeout(() => {
+    // Short delay to ensure mainWindow exists
+    checkForUpdates(); // Auto-check on startup (defualt behavior)
+  }, 3000);
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

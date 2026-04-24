@@ -10,12 +10,13 @@ input, textarea, [contenteditable="true"] {
 
 :root {
   --topbar-bg: #5aef7e;
+  --primary-color: #17b340;
   --tab-active: #82efa2;
   --bg-main: #ebfbeb;
   --card-bg: #cffebb;
   --text-dark: #111;
   
-  --font-serif: 'Outfit', 'Georgia', serif;
+  --font-display: 'Outfit', 'Georgia', serif;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -65,9 +66,16 @@ body.video-fullscreen .main-content {
 }
 
 .brand-icon {
-  width: 20px;
-  height: 20px;
-  fill: currentColor;
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+
+.credits-logo {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+  margin-bottom: 20px;
 }
 
 .nav-buttons {
@@ -344,7 +352,8 @@ body.video-fullscreen .main-content {
 }
 
 .footer-logo button#btn-whats-new, 
-.footer-logo button#btn-credits {
+.footer-logo button#btn-credits,
+.footer-logo button#btn-open-flags {
   pointer-events: auto;
   background: rgba(255, 255, 255, 0.4);
   backdrop-filter: blur(10px);
@@ -360,7 +369,8 @@ body.video-fullscreen .main-content {
 }
 
 .footer-logo button#btn-whats-new:hover,
-.footer-logo button#btn-credits:hover {
+.footer-logo button#btn-credits:hover,
+.footer-logo button#btn-open-flags:hover {
   background: rgba(26, 92, 45, 0.1);
   border-color: rgba(26, 92, 45, 0.5);
   transform: translateY(-2px);
@@ -689,6 +699,16 @@ webview.active {
   opacity: 0.5;
 }
 
+.brand-icon {
+  width: 36px;
+  height: 36px;
+}
+
+.credits-logo {
+  width: 120px;
+  height: 120px;
+}
+
 /* Settings Layout */
 .settings-layout {
   display: flex;
@@ -936,15 +956,15 @@ input:checked + .slider:before { transform: translateX(22px); }
   display: flex;
   align-items: center;
   gap: 12px;
-  background: rgba(20, 20, 20, 0.85);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255,255,255,0.08);
-  color: #fff;
-  padding: 14px 18px;
-  border-radius: 14px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+  background: rgba(235, 251, 235, 0.9);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(46, 179, 64, 0.2);
+  color: #1a5c2d;
+  padding: 16px 20px;
+  border-radius: 16px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.1);
   z-index: 9999;
-  max-width: 420px;
+  max-width: 440px;
   width: calc(100% - 60px);
   opacity: 0;
   pointer-events: none;
@@ -982,7 +1002,7 @@ input:checked + .slider:before { transform: translateX(22px); }
 .leef-toast-close {
   background: none;
   border: none;
-  color: rgba(255,255,255,0.5);
+  color: rgba(26, 92, 45, 0.4);
   font-size: 1.3rem;
   cursor: pointer;
   line-height: 1;
@@ -993,7 +1013,7 @@ input:checked + .slider:before { transform: translateX(22px); }
 }
 
 .leef-toast-close:hover {
-  color: #fff;
+  color: #1a5c2d;
 }
 
 /* --- HUB ADD TILE MODAL --- */
@@ -1251,15 +1271,72 @@ input:checked + .slider:before { transform: translateX(22px); }
   border: 1px solid rgba(0,0,0,0.05);
 }
 
-.flag-svg {
-  width: 20px;
-  height: 15px;
-  border-radius: 2px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+/* --- v0.1.5 UI REFINEMENT --- */
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
-.credits-footer p {
-  margin-bottom: 5px;
+.radio-row {
+  display: flex !important;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.radio-row:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.radio-row input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #1a5c2d;
+}
+
+.radio-row span {
+  font-size: 0.95rem;
+  color: var(--text-dark);
+}
+
+.radio-row strong {
+  font-weight: 600;
+}
+
+.status-badge {
+  font-size: 0.7rem;
+  font-weight: 800;
+  padding: 2px 10px;
+  border-radius: 20px;
+  background: rgba(0,0,0,0.06);
+  color: rgba(0,0,0,0.4);
+  letter-spacing: 0.05em;
+  border: 1px solid rgba(0,0,0,0.05);
+}
+
+.status-badge.active {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-color: rgba(46, 125, 50, 0.2);
+}
+
+.status-badge.syncing {
+  background: #e3f2fd;
+  color: #1565c0;
+  border-color: rgba(21, 101, 192, 0.2);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 0.7; }
+  50% { opacity: 1; }
+  100% { opacity: 0.7; }
 }
 
 .beta-tag {
@@ -1276,3 +1353,221 @@ input:checked + .slider:before { transform: translateX(22px); }
   border: 1px solid rgba(245, 127, 23, 0.2);
 }
 
+/* Downloads Dropdown */
+.downloads-dropdown {
+  position: absolute;
+  top: 45px;
+  right: 0;
+  width: 320px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 16px;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.12);
+  padding: 18px;
+  z-index: 2000;
+  max-height: 450px;
+  overflow-y: auto;
+}
+
+.downloads-header {
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+
+.downloads-header h3 {
+  font-size: 0.95rem;
+  font-family: var(--font-display);
+}
+
+.download-item {
+  margin-bottom: 12px;
+  padding: 10px;
+  background: rgba(0,0,0,0.02);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.download-info {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.download-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.download-progress-container {
+  height: 8px;
+  background: rgba(0,0,0,0.06);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.download-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--topbar-bg), var(--primary-color));
+  width: 0%;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.download-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Flags Layout */
+.flags-layout {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  width: 100%;
+  height: 100%;
+  padding: 40px;
+  overflow-y: auto;
+  background: var(--bg-main);
+  font-family: var(--font-sans);
+}
+
+.flags-content {
+  width: 100%;
+  max-width: 700px;
+}
+
+.flags-header {
+  margin-bottom: 30px;
+}
+
+.flags-header h1 {
+  font-family: var(--font-display);
+  font-size: 2.8rem;
+  margin-bottom: 12px;
+  color: #1a5c2d;
+}
+
+.flags-subtitle {
+  color: #666;
+  font-size: 1.1rem;
+}
+
+.flags-list {
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.flag-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  background: white;
+  border-radius: 16px;
+  border: 1px solid rgba(0,0,0,0.05);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+}
+
+.flag-card:last-child {
+  border-bottom: none;
+}
+
+.flag-info h3 {
+  font-size: 1rem;
+  margin-bottom: 4px;
+}
+
+.flag-info p {
+  font-size: 0.85rem;
+  color: #777;
+}
+
+.flags-footer {
+  margin-top: 30px;
+  text-align: center;
+}
+
+.flags-footer p {
+  font-size: 0.8rem;
+  color: #999;
+  margin-top: 15px;
+}
+
+/* --- ANIMATIONS & TRANSITIONS --- */
+
+@keyframes bloomIn {
+  from { opacity: 0; transform: scale(0.99) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes slideDownIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes tabEnter {
+  from { opacity: 0; transform: translateX(-10px) scale(0.95); width: 40px; }
+  to { opacity: 1; transform: translateX(0) scale(1); width: auto; }
+}
+
+@keyframes itemEnter {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Base transitions */
+.nav-btn, .settings-btn, .hub-tile, .news-card, .bookmark-item, .download-item {
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), 
+              background 0.2s, 
+              box-shadow 0.2s,
+              opacity 0.2s;
+}
+
+.nav-btn:active, .hub-tile:active {
+  transform: scale(0.95);
+}
+
+/* View switching animation */
+.home-section, .settings-layout, .changelog-layout, .credits-layout, .flags-layout {
+  animation: bloomIn 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.webview-container.active webview.active {
+  animation: bloomIn 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Dropdown animations */
+.bookmarks-dropdown, .downloads-dropdown {
+  animation: slideDownIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: top right;
+}
+
+/* Tabs */
+.tab {
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: tabEnter 0.3s ease-out;
+}
+
+.tab.active {
+  background: var(--tab-active) !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+}
+
+.tab-dragging {
+  opacity: 0.5;
+  transform: scale(0.98);
+  box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+  z-index: 1000;
+}
+
+/* New Item animations */
+.download-item, .bookmark-item {
+  animation: itemEnter 0.2s ease-out;
+}

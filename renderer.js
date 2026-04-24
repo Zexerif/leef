@@ -68,11 +68,12 @@ class SettingsManager {
       fontSize: 'medium',
       tracking: 'standard',
       httpsOnly: true,
-      adBlocker: true,
+      adBlockerMode: 'none', // none, basic, comprehensive
       backgroundLimit: true,
       allowNotifications: true,
       askDownload: false,
       blockAIOverview: true,
+      autoCheckUpdates: true,
       customUa: '',
       dohToggle: false,
       proxyUrl: ''
@@ -101,7 +102,8 @@ class SettingsManager {
     if (el('zoom-select')) el('zoom-select').value = s.zoom;
     if (el('font-size-select')) el('font-size-select').value = s.fontSize;
     if (el('https-only')) el('https-only').checked = s.httpsOnly;
-    if (el('ad-blocker')) el('ad-blocker').checked = s.adBlocker;
+    if (el('auto-check-updates')) el('auto-check-updates').checked = s.autoCheckUpdates;
+    document.querySelectorAll(`input[name="adblock-tier"]`).forEach(r => { r.checked = r.value === (s.adBlockerMode || 'none'); });
     if (el('background-limit')) el('background-limit').checked = s.backgroundLimit;
     if (el('allow-notifications')) el('allow-notifications').checked = s.allowNotifications;
     if (el('ask-download')) el('ask-download').checked = s.askDownload;
@@ -160,6 +162,88 @@ class SettingsManager {
         } catch(e){}
       });
     }
+
+    // v0.1.5 Update/AdBlock Buttons
+    const btnCheck = document.getElementById('btn-check-updates');
+    if (btnCheck) {
+      btnCheck.addEventListener('click', () => {
+        try {
+          window.require('electron').ipcRenderer.send('manual-update-check');
+          btnCheck.textContent = 'Checking...';
+          btnCheck.disabled = true;
+        } catch(e){}
+      });
+    }
+
+    const btnRefreshAd = document.getElementById('btn-refresh-adblock');
+    if (btnRefreshAd) {
+      btnRefreshAd.addEventListener('click', () => {
+        try {
+          window.require('electron').ipcRenderer.send('refresh-adblock');
+        } catch(e){}
+      });
+    }
+
+    // IPC Listeners for v0.1.5 Transparency
+    const ipc = window.require('electron').ipcRenderer;
+    ipc.on('adblock-status', (event, status) => {
+      const badge = document.getElementById('adblock-status-badge');
+      const btn = document.getElementById('btn-refresh-adblock');
+      if (badge) {
+        badge.style.display = 'inline-block';
+        badge.className = 'status-badge ' + (status === 'syncing' ? 'syncing' : 'active');
+        badge.textContent = status === 'syncing' ? '[UPDATING...]' : '[READY]';
+      }
+      if (btn) btn.style.display = 'block';
+    });
+
+    ipc.on('update-available', (event, data) => {
+      const badge = document.getElementById('update-status-badge');
+      const btn = document.getElementById('btn-check-updates');
+      const toastAction = document.getElementById('leef-toast-action');
+      
+      if (btn) {
+        btn.textContent = 'Check for Updates Now';
+        btn.disabled = false;
+      }
+      
+      if (data === 'none') {
+        if (window.toastManager) window.toastManager.show('✅ Up To Date', 'You are running the latest version of Leef.', 4000);
+        if (badge) badge.textContent = '[UP TO DATE]';
+      } else if (data === 'error') {
+        if (window.toastManager) window.toastManager.show('⚠️ Check Failed', 'Could not reach the update server. Try again later.', 5000);
+      } else {
+        const displayVersion = window.BrowserUtils.sanitize(data.version);
+        const tag = data.tag;
+
+        if (badge) {
+          badge.textContent = '[UPDATE AVAILABLE]';
+          badge.className = 'status-badge syncing';
+        }
+        
+        if (window.toastManager) {
+          window.toastManager.show('✨ Update Available', `${displayVersion} is now available for download!`, 12000);
+          
+          if (toastAction) {
+            toastAction.style.display = 'block';
+            const actionBtn = toastAction.querySelector('button');
+            actionBtn.textContent = 'View on GitHub';
+            actionBtn.onclick = () => {
+              window.tabManager.createTab(`https://github.com/git-QTech/leef/releases/tag/${tag}`);
+            };
+          }
+        }
+      }
+    });
+
+    const btnFlags = document.getElementById('btn-flags');
+    if (btnFlags) {
+      btnFlags.addEventListener('click', () => {
+        if (window.toastManager) {
+          window.toastManager.show('🛠️ Experimental Flags', 'Individual feature-flags are coming soon in v0.1.6 as part of our advanced auditing suite.', 6000);
+        }
+      });
+    }
   }
 
   saveSettings() {
@@ -172,7 +256,8 @@ class SettingsManager {
       fontSize: document.getElementById('font-size-select').value,
       tracking: document.querySelector('input[name="tracking"]:checked')?.value || 'standard',
       httpsOnly: document.getElementById('https-only').checked,
-      adBlocker: document.getElementById('ad-blocker').checked,
+      adBlockerMode: document.querySelector('input[name="adblock-tier"]:checked')?.value || 'none',
+      autoCheckUpdates: document.getElementById('auto-check-updates').checked,
       backgroundLimit: document.getElementById('background-limit').checked,
       allowNotifications: document.getElementById('allow-notifications').checked,
       askDownload: document.getElementById('ask-download').checked,
@@ -185,9 +270,13 @@ class SettingsManager {
     this.applyVisualSettings();
     
     try {
+      // Include Labs flags in the primary settings object
+      const labs = JSON.parse(localStorage.getItem('leef_labs_flags') || '{}');
+      const settingsWithLabs = { ...this.currentSettings, labs };
+
       // Persist to localStorage AND send to main process
       localStorage.setItem('leef_settings', JSON.stringify(this.currentSettings));
-      window.require('electron').ipcRenderer.send('apply-settings', this.currentSettings);
+      window.require('electron').ipcRenderer.send('apply-settings', settingsWithLabs);
       if (window.toastManager) window.toastManager.show('⚙️ Settings Saved', 'Your preferences have been applied.', 3000);
     } catch (e) { console.log("IPC not available", e); }
   }
@@ -280,6 +369,9 @@ class BookmarksManager {
       if (this.dropdown.style.display === 'none') {
         this.render();
         this.dropdown.style.display = 'flex';
+        // Close other dropdowns
+        const d = document.getElementById('downloads-dropdown');
+        if (d) d.style.display = 'none';
       } else {
         this.dropdown.style.display = 'none';
       }
@@ -572,16 +664,55 @@ class TabManager {
   }
 
   createTab(route = 'home') {
+    const isInternal = ['home', 'settings', 'changelog', 'credits', 'flags'].includes(route);
+    
+    // Hide labs view when navigating away
+    const labsView = document.getElementById('flags-view');
+    if (labsView) labsView.style.display = 'none';
+
     const tabId = 'tab-' + this.tabCounter++;
-    const isInternal = ['home', 'settings', 'changelog', 'credits'].includes(route);
-    
     const tabEl = document.createElement('div');
-    tabEl.className = 'tab';
     tabEl.id = tabId;
-    
-    const tabTitle = document.createElement('div');
+    tabEl.dataset.tabId = tabId;
+    tabEl.className = 'tab';
+    tabEl.draggable = true;
+
+    tabEl.addEventListener('dragstart', (e) => {
+      e.target.classList.add('tab-dragging');
+      e.dataTransfer.setData('text/plain', tabId);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    tabEl.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      
+      const draggingTab = document.querySelector('.tab-dragging');
+      if (!draggingTab || draggingTab === tabEl) return;
+
+      const rect = tabEl.getBoundingClientRect();
+      const midPoint = rect.left + rect.width / 2;
+      
+      if (e.clientX < midPoint) {
+        tabEl.parentNode.insertBefore(draggingTab, tabEl);
+      } else {
+        tabEl.parentNode.insertBefore(draggingTab, tabEl.nextSibling);
+      }
+    });
+
+    tabEl.addEventListener('dragend', (e) => {
+      e.target.classList.remove('tab-dragging');
+      // Sync internal array with new DOM order
+      this.syncInternalOrder();
+    });
+
+    tabEl.addEventListener('drop', (e) => {
+      e.preventDefault();
+    });
+
+    const tabTitle = document.createElement('span');
     tabTitle.className = 'tab-title';
-    tabTitle.textContent = route === 'home' ? 'Leef Browser | Home' : (route === 'settings' ? 'Settings' : (route === 'changelog' ? "What's New" : (route === 'credits' ? 'Credits' : 'Loading...')));
+    tabTitle.textContent = route === 'home' ? 'Leef Browser | Home' : (route === 'settings' ? 'Settings' : (route === 'changelog' ? "What's New" : (route === 'credits' ? 'Credits' : (route === 'flags' ? 'Leef Labs' : 'Loading...'))));
     
     const tabClose = document.createElement('button');
     tabClose.className = 'tab-close';
@@ -625,6 +756,7 @@ class TabManager {
     if (tab.webviewEl) return; // Already exists
     tab.webviewEl = document.createElement('webview');
     tab.webviewEl.id = 'webview-' + tab.id;
+    tab.webviewEl.setAttribute('allowpopups', '');
     UI.views.webviewsContainer.appendChild(tab.webviewEl);
     
     tab.webviewEl.addEventListener('did-start-loading', () => {
@@ -632,7 +764,20 @@ class TabManager {
       tab.url = tab.webviewEl.src;
       this.updateTabUI(tab);
     });
-    
+
+    tab.webviewEl.addEventListener('page-title-updated', (e) => {
+      tab.title = e.title;
+      this.updateTabUI(tab);
+    });
+
+    // Catch the manual tab interceptor messages
+    tab.webviewEl.addEventListener('console-message', (e) => {
+      if (e.message && e.message.startsWith('LEEF_NEW_TAB:')) {
+        const url = e.message.replace('LEEF_NEW_TAB:', '');
+        this.createTab(url);
+      }
+    });
+
     tab.webviewEl.addEventListener('did-stop-loading', () => {
       tab.title = tab.webviewEl.getTitle() || tab.url;
       tab.url = tab.webviewEl.getURL();
@@ -642,6 +787,25 @@ class TabManager {
          try { tab.webviewEl.setZoomFactor(parseFloat(this.settings.currentSettings.zoom) || 1.0); } catch(e){}
       }
       this.updateTabUI(tab);
+
+      // GUARANTEED NEW TAB INTERCEPTOR
+      // Bypasses Electron's unpredictable native popup handlers.
+      tab.webviewEl.executeJavaScript(`
+        (function() {
+          if (window.__leefHooked) return;
+          window.__leefHooked = true;
+          document.addEventListener('click', (e) => {
+            const a = e.target.closest('a');
+            if (!a || !a.href) return;
+            // Catch middle clicks and target="_blank"
+            if (e.button === 1 || a.target === '_blank') {
+              e.preventDefault();
+              e.stopPropagation();
+              console.log('LEEF_NEW_TAB:' + a.href);
+            }
+          }, true);
+        })();
+      `);
       
       //  AI Overview Blocking (again, johan this needs to be redone please k love ya)
       if (this.settings.currentSettings.blockAIOverview && tab.url.includes('google.com')) {
@@ -692,29 +856,16 @@ class TabManager {
                 triggerSearch(e.target.value);
               }
             }, true);
-            
-            // Intercept Search Button click
-            document.addEventListener('click', (e) => {
-              const btn = e.target.closest('button[aria-label="Google Search"], input[value="Google Search"]');
-              if (btn) {
-                const input = document.querySelector('input[name="q"], textarea[name="q"]');
-                if (input) {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  triggerSearch(input.value);
-                }
-              }
-            }, true);
           })();
         `);
       }
 
-      // Show YouTube quality warning toast once per session
+      // Show YouTube quality/adblock warning toast once per session
       if (window.toastManager && tab.url && tab.url.includes('youtube.com')) {
         window.toastManager.showOnce(
           'youtube-4k',
-          'YouTube Performance Warning',
-          'Streaming above 1440p may slow down Leef. Fullscreen may also show a border due to browser limitations.'
+          'YouTube Performance & Ad-Blocking',
+          'YouTube may reduce video quality or block playback if an ad-blocker is detected. Performance may also slow down above 1440p.'
         );
       }
     });
@@ -759,8 +910,14 @@ class TabManager {
     if (tab.url === 'home') tab.tabTitle.textContent = 'Leef Browser | Home';
     else if (tab.url === 'settings') tab.tabTitle.textContent = 'Settings';
     else if (tab.url === 'changelog') tab.tabTitle.textContent = "What's New";
-    else if (tab.url === 'credits') tab.tabTitle.textContent = "Credits";
-    else tab.tabTitle.textContent = tab.title;
+    else if (tab.url === 'flags') tab.tabTitle.textContent = "Leef Labs";
+    else {
+      let displayTitle = tab.title || 'Loading...';
+      if (this.settings.currentSettings.blockAIOverview) {
+        displayTitle = displayTitle.replace(/ -noai/gi, '');
+      }
+      tab.tabTitle.textContent = displayTitle;
+    }
 
     if (this.activeTabId === tab.id) {
       if (!tab.isInternal) {
@@ -823,6 +980,9 @@ class TabManager {
     UI.views.changelog.style.display = tab.url === 'changelog' ? 'flex' : 'none';
     UI.views.credits.style.display = tab.url === 'credits' ? 'flex' : 'none';
     
+    const labsView = document.getElementById('flags-view');
+    if (labsView) labsView.style.display = tab.url === 'flags' ? 'flex' : 'none';
+    
     if (tab.isInternal) {
       UI.views.webviewsContainer.classList.remove('active');
     } else {
@@ -864,8 +1024,12 @@ class TabManager {
     if (UI.buttons.whatsNew) UI.buttons.whatsNew.addEventListener('click', () => this.createTab('changelog'));
     if (UI.buttons.credits) UI.buttons.credits.addEventListener('click', () => this.createTab('credits'));
 
-    // Handle Context Menu commands from Main Process
+    // Handle Context Menu and Popup commands from Main Process
     try {
+      window.require('electron').ipcRenderer.on('open-new-tab', (event, url) => {
+        this.createTab(url);
+      });
+
       window.require('electron').ipcRenderer.on('context-menu-command', (event, data) => {
         const tab = this.getActiveTab();
         if (!tab) return;
@@ -885,6 +1049,18 @@ class TabManager {
             break;
           case 'copy-image':
             if (tab.webviewEl) tab.webviewEl.copyImageAt(data.x, data.y);
+            break;
+          case 'search-google':
+            this.createTab('https://www.google.com/search?q=' + encodeURIComponent(data.text));
+            break;
+          case 'print':
+            if (tab.webviewEl) tab.webviewEl.print();
+            break;
+          case 'view-source':
+            if (tab.webviewEl) this.createTab('view-source:' + tab.webviewEl.getURL());
+            break;
+          case 'save-page':
+            if (tab.webviewEl) tab.webviewEl.downloadURL(tab.webviewEl.getURL());
             break;
         }
       });
@@ -931,6 +1107,19 @@ class TabManager {
       if (tab && !tab.isInternal && tab.webviewEl) tab.webviewEl.reload();
     });
   }
+
+  syncInternalOrder() {
+    const tabElements = Array.from(UI.tabsContainer.querySelectorAll('.tab'));
+    const newTabsOrder = [];
+    
+    tabElements.forEach(el => {
+      const tabId = el.dataset.tabId;
+      const t = this.tabs.find(tab => tab.id === tabId);
+      if (t) newTabsOrder.push(t);
+    });
+    
+    this.tabs = newTabsOrder;
+  }
 }
 
 class ToastManager {
@@ -949,6 +1138,11 @@ class ToastManager {
     if (!this.el) return;
     this.el.querySelector('.leef-toast-title').textContent = title;
     this.el.querySelector('.leef-toast-msg').textContent = msg;
+    
+    // Reset action div visibility so buttons don't leak between toasts
+    const actionDiv = document.getElementById('leef-toast-action');
+    if (actionDiv) actionDiv.style.display = 'none';
+
     this.el.classList.add('visible');
     clearTimeout(this.hideTimer);
     this.hideTimer = setTimeout(() => this.hide(), durationMs);
@@ -963,6 +1157,157 @@ class ToastManager {
     if (this.shownThisSession.has(key)) return;
     this.shownThisSession.add(key);
     this.show(title, msg, durationMs);
+  }
+}
+
+class DownloadManager {
+  constructor() {
+    this.el = document.getElementById('btn-downloads');
+    this.list = document.getElementById('downloads-list');
+    this.dropdown = document.getElementById('downloads-dropdown');
+    this.downloads = new Map();
+    this.bindEvents();
+  }
+
+  bindEvents() {
+    if (this.el) {
+      this.el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.dropdown.style.display = this.dropdown.style.display === 'none' ? 'block' : 'none';
+        // Close other dropdowns
+        const b = document.getElementById('bookmarks-dropdown');
+        if (b) b.style.display = 'none';
+      });
+    }
+
+    // Global close
+    document.addEventListener('click', (e) => {
+      if (this.dropdown && !this.dropdown.contains(e.target) && e.target !== this.el) {
+        this.dropdown.style.display = 'none';
+      }
+    });
+
+    window.require('electron').ipcRenderer.on('download-status', (event, data) => {
+      if (data.status === 'started') {
+        this.downloads.set(data.id, { ...data, received: 0 });
+        this.renderItem(data.id);
+        // Show dropdown when download starts
+        this.dropdown.style.display = 'block';
+      } else if (data.status === 'progressing') {
+        const dl = this.downloads.get(data.id);
+        if (dl) {
+          dl.received = data.received;
+          this.updateItemProgress(data.id);
+        }
+      } else if (data.status === 'completed') {
+        const dl = this.downloads.get(data.id);
+        if (dl) {
+          dl.status = 'completed';
+          dl.path = data.path;
+          this.renderItem(data.id);
+        }
+      } else if (data.status === 'failed' || data.status === 'interrupted') {
+        const dl = this.downloads.get(data.id);
+        if (dl) {
+          dl.status = 'failed';
+          this.renderItem(data.id);
+        }
+      }
+    });
+  }
+
+  renderItem(id) {
+    const dl = this.downloads.get(id);
+    if (!dl) return;
+
+    let itemEl = document.getElementById(`dl-${id}`);
+    if (!itemEl) {
+      itemEl = document.createElement('div');
+      itemEl.id = `dl-${id}`;
+      itemEl.className = 'download-item';
+      this.list.insertBefore(itemEl, this.list.firstChild);
+    }
+
+    const isDone = dl.status === 'completed';
+    const progress = dl.total > 0 ? Math.round((dl.received / dl.total) * 100) : 0;
+
+    itemEl.innerHTML = `
+      <div class="download-info">
+        <span class="download-name" title="${dl.name}">${dl.name}</span>
+        <span class="download-percent">${isDone ? 'Finished' : progress + '%'}</span>
+      </div>
+      <div class="download-progress-container" style="display: ${isDone ? 'none' : 'block'}">
+        <div class="download-progress-bar" id="pb-${id}" style="width: ${progress}%"></div>
+      </div>
+      <div class="download-actions" style="display: ${isDone ? 'flex' : 'none'}">
+        <button class="settings-btn" style="padding: 4px 10px; font-size: 0.75rem;" onclick="window.require('electron').ipcRenderer.send('show-item-in-folder', '${dl.path.replace(/\\/g, '\\\\')}')">Open Folder</button>
+      </div>
+    `;
+  }
+
+  updateItemProgress(id) {
+    const dl = this.downloads.get(id);
+    const progress = dl.total > 0 ? Math.round((dl.received / dl.total) * 100) : 0;
+    const pb = document.getElementById(`pb-${id}`);
+    const percent = document.querySelector(`#dl-${id} .download-percent`);
+    if (pb) pb.style.width = progress + '%';
+    if (percent) percent.textContent = progress + '%';
+  }
+}
+
+class LabsManager {
+  constructor() {
+    this.flags = this.loadFlags();
+    this.view = document.getElementById('flags-view');
+    this.btnOpen = document.getElementById('btn-open-flags');
+    this.btnApply = document.getElementById('btn-flags-relaunch');
+    this.bindEvents();
+    this.syncUI();
+  }
+
+  loadFlags() {
+    try {
+      return JSON.parse(localStorage.getItem('leef_labs_flags') || '{}');
+    } catch(e) { return {}; }
+  }
+
+  saveFlags() {
+    localStorage.setItem('leef_labs_flags', JSON.stringify(this.flags));
+    if (this.btnApply) this.btnApply.style.display = 'inline-block';
+  }
+
+  bindEvents() {
+    if (this.btnOpen) {
+      this.btnOpen.addEventListener('click', () => {
+        if (window.tabManager) {
+          window.tabManager.createTab('flags');
+        }
+      });
+    }
+
+    if (this.btnApply) {
+      this.btnApply.addEventListener('click', () => {
+        window.location.reload();
+      });
+    }
+
+    // Bind individual flags
+    const chkSafe = document.getElementById('flag-force-safe-off');
+    if (chkSafe) {
+      chkSafe.addEventListener('change', (e) => {
+        this.flags.force_safe_off = e.target.checked;
+        this.saveFlags();
+      });
+    }
+  }
+
+  syncUI() {
+    const chkSafe = document.getElementById('flag-force-safe-off');
+    if (chkSafe) chkSafe.checked = !!this.flags.force_safe_off;
+  }
+
+  isFlagEnabled(key) {
+    return !!this.flags[key];
   }
 }
 
@@ -999,6 +1344,12 @@ window.onload = () => {
       if (window.toastManager) window.toastManager.show('🔄 Refreshing News', 'Fetching the latest headlines...', 2500);
     });
   }
+
+  // Labs/Experimental
+  window.labsManager = new LabsManager();
+
+  // Downloads
+  window.downloadManager = new DownloadManager();
 
   // Startup behavior
   const startup = settingsMgr.currentSettings.startup || 'newtab';
