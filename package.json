@@ -1,6 +1,6 @@
 {
   "name": "private-browser",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Leef is a fast, private, and modern Electron-based web browser built for everyday use.",
   "author": "QTech",
   "private": true,

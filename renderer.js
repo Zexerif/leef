@@ -12,12 +12,15 @@ class BrowserUtils {
       if (!str.startsWith('http://') && !str.startsWith('https://')) return 'https://' + str;
       return str;
     }
-    
-    // AI Overview Blocking for Google (johan this needs to be redone)
-    if (blockAI && engineBaseUrl.includes('google.com/search') && !str.toLowerCase().includes('-noai')) {
-      str += ' -noai';
+
+    // Robust AI Overview Blocking for Google
+    if (blockAI && engineBaseUrl.includes('google.com/search')) {
+      const noaiRegex = /(^|\s)-noai(\s|$)/i;
+      if (!noaiRegex.test(str)) {
+        str = str.trim() + ' -noai';
+      }
     }
-    
+
     return engineBaseUrl + encodeURIComponent(str);
   }
 
@@ -76,7 +79,9 @@ class SettingsManager {
       autoCheckUpdates: true,
       customUa: '',
       dohToggle: false,
-      proxyUrl: ''
+      proxyUrl: '',
+      liveAutocomplete: false,
+      sitePermissions: {}
     };
     // Load previously saved settings and merge with defaults
     this.currentSettings = this.loadSavedSettings();
@@ -89,7 +94,7 @@ class SettingsManager {
     try {
       const saved = JSON.parse(localStorage.getItem('leef_settings') || '{}');
       return { ...this.defaultSettings, ...saved };
-    } catch(e) {
+    } catch (e) {
       return { ...this.defaultSettings };
     }
   }
@@ -111,15 +116,19 @@ class SettingsManager {
     if (el('custom-ua')) el('custom-ua').value = s.customUa || '';
     if (el('doh-toggle')) el('doh-toggle').checked = s.dohToggle;
     if (el('proxy-url')) el('proxy-url').value = s.proxyUrl || '';
+    if (el('live-autocomplete')) el('live-autocomplete').checked = s.liveAutocomplete;
     document.querySelectorAll(`input[name="startup"]`).forEach(r => { r.checked = r.value === s.startup; });
     document.querySelectorAll(`input[name="tracking"]`).forEach(r => { r.checked = r.value === s.tracking; });
+
+    // Show adblock badge based on saved setting
+    this.updateAdblockBadge(s.adBlockerMode || 'none');
   }
 
   sendSettingsToMain() {
     // Send current settings to the main process so network rules apply on startup
     try {
       window.require('electron').ipcRenderer.send('apply-settings', this.currentSettings);
-    } catch(e) { console.log('IPC not available', e); }
+    } catch (e) { console.log('IPC not available', e); }
   }
 
   bindEvents() {
@@ -151,7 +160,7 @@ class SettingsManager {
         try {
           window.require('electron').ipcRenderer.send('clear-data');
           if (window.toastManager) window.toastManager.show('🧹 Data Cleared', 'Your browsing history, cache, and cookies have been cleared securely.', 5000);
-        } catch(e){}
+        } catch (e) { }
       });
     }
     if (UI.buttons.defaultBrowser) {
@@ -159,7 +168,7 @@ class SettingsManager {
         try {
           window.require('electron').ipcRenderer.send('set-default-browser');
           if (window.toastManager) window.toastManager.show('✅ Default Browser Set', 'Leef is now your default browser for http and https links.', 5000);
-        } catch(e){}
+        } catch (e) { }
       });
     }
 
@@ -171,7 +180,7 @@ class SettingsManager {
           window.require('electron').ipcRenderer.send('manual-update-check');
           btnCheck.textContent = 'Checking...';
           btnCheck.disabled = true;
-        } catch(e){}
+        } catch (e) { }
       });
     }
 
@@ -180,7 +189,7 @@ class SettingsManager {
       btnRefreshAd.addEventListener('click', () => {
         try {
           window.require('electron').ipcRenderer.send('refresh-adblock');
-        } catch(e){}
+        } catch (e) { }
       });
     }
 
@@ -191,8 +200,16 @@ class SettingsManager {
       const btn = document.getElementById('btn-refresh-adblock');
       if (badge) {
         badge.style.display = 'inline-block';
-        badge.className = 'status-badge ' + (status === 'syncing' ? 'syncing' : 'active');
-        badge.textContent = status === 'syncing' ? '[UPDATING...]' : '[READY]';
+        if (status === 'syncing') {
+          badge.className = 'status-badge syncing';
+          badge.textContent = '[UPDATING...]';
+        } else if (status === 'error') {
+          badge.className = 'status-badge syncing';
+          badge.textContent = '[ERROR]';
+        } else {
+          badge.className = 'status-badge active';
+          badge.textContent = '[READY]';
+        }
       }
       if (btn) btn.style.display = 'block';
     });
@@ -201,29 +218,29 @@ class SettingsManager {
       const badge = document.getElementById('update-status-badge');
       const btn = document.getElementById('btn-check-updates');
       const toastAction = document.getElementById('leef-toast-action');
-      
+
       if (btn) {
         btn.textContent = 'Check for Updates Now';
         btn.disabled = false;
       }
-      
+
       if (data === 'none') {
         if (window.toastManager) window.toastManager.show('✅ Up To Date', 'You are running the latest version of Leef.', 4000);
         if (badge) badge.textContent = '[UP TO DATE]';
       } else if (data === 'error') {
         if (window.toastManager) window.toastManager.show('⚠️ Check Failed', 'Could not reach the update server. Try again later.', 5000);
       } else {
-        const displayVersion = window.BrowserUtils.sanitize(data.version);
+        const displayVersion = BrowserUtils.sanitize(data.version);
         const tag = data.tag;
 
         if (badge) {
           badge.textContent = '[UPDATE AVAILABLE]';
           badge.className = 'status-badge syncing';
         }
-        
+
         if (window.toastManager) {
           window.toastManager.show('✨ Update Available', `${displayVersion} is now available for download!`, 12000);
-          
+
           if (toastAction) {
             toastAction.style.display = 'block';
             const actionBtn = toastAction.querySelector('button');
@@ -247,8 +264,12 @@ class SettingsManager {
   }
 
   saveSettings() {
-    if(!document.getElementById('search-engine-select')) return; // safety
+    if (!document.getElementById('search-engine-select')) return; // safety
+    
+    const existingPermissions = this.currentSettings.sitePermissions || {};
+    
     this.currentSettings = {
+      sitePermissions: existingPermissions,
       searchEngine: document.getElementById('search-engine-select').value,
       startup: document.querySelector('input[name="startup"]:checked')?.value || 'newtab',
       language: document.getElementById('language-select').value,
@@ -264,11 +285,12 @@ class SettingsManager {
       blockAIOverview: document.getElementById('block-ai').checked,
       customUa: document.getElementById('custom-ua').value,
       dohToggle: document.getElementById('doh-toggle').checked,
-      proxyUrl: document.getElementById('proxy-url').value
+      proxyUrl: document.getElementById('proxy-url').value,
+      liveAutocomplete: document.getElementById('live-autocomplete').checked
     };
-    
+
     this.applyVisualSettings();
-    
+
     try {
       // Include Labs flags in the primary settings object
       const labs = JSON.parse(localStorage.getItem('leef_labs_flags') || '{}');
@@ -278,7 +300,25 @@ class SettingsManager {
       localStorage.setItem('leef_settings', JSON.stringify(this.currentSettings));
       window.require('electron').ipcRenderer.send('apply-settings', settingsWithLabs);
       if (window.toastManager) window.toastManager.show('⚙️ Settings Saved', 'Your preferences have been applied.', 3000);
+
+      // Update adblock badge immediately based on current mode
+      this.updateAdblockBadge(this.currentSettings.adBlockerMode);
     } catch (e) { console.log("IPC not available", e); }
+  }
+
+  updateAdblockBadge(mode) {
+    const badge = document.getElementById('adblock-status-badge');
+    const btn = document.getElementById('btn-refresh-adblock');
+    if (mode === 'comprehensive') {
+      if (badge) { badge.style.display = 'inline-block'; badge.className = 'status-badge active'; badge.textContent = '[READY]'; }
+      if (btn) btn.style.display = 'block';
+    } else if (mode === 'basic') {
+      if (badge) { badge.style.display = 'inline-block'; badge.className = 'status-badge active'; badge.textContent = '[OFFLINE]'; }
+      if (btn) btn.style.display = 'none';
+    } else {
+      if (badge) badge.style.display = 'none';
+      if (btn) btn.style.display = 'none';
+    }
   }
 
   applyVisualSettings() {
@@ -288,7 +328,7 @@ class SettingsManager {
     if (this.currentSettings.fontSize === 'large') px = '20px';
     if (this.currentSettings.fontSize === 'very-large') px = '24px';
     document.body.style.fontSize = px;
-    
+
     // Zoom propagates via TabManager later
     if (window.tabManager) {
       window.tabManager.applyZoomToAll(parseFloat(this.currentSettings.zoom) || 1.0);
@@ -303,7 +343,7 @@ class BookmarksManager {
     this.btnAdd = document.getElementById('btn-add-bookmark');
     this.list = document.getElementById('bookmarks-list');
     this.saved = [];
-    
+
     this.bindEvents();
     this.load();
   }
@@ -312,7 +352,7 @@ class BookmarksManager {
     try {
       const raw = localStorage.getItem('leef_bookmarks');
       if (raw) this.saved = JSON.parse(raw);
-    } catch(e) {}
+    } catch (e) { }
     this.render();
   }
 
@@ -327,19 +367,19 @@ class BookmarksManager {
       this.list.innerHTML = '<p style="opacity: 0.6; padding: 10px; font-size: 0.9rem;">No bookmarks saved yet.</p>';
       return;
     }
-    
+
     this.saved.forEach((bm, i) => {
       const item = document.createElement('div');
       item.className = 'bookmark-item';
       let faviconUrl = '';
-      try { faviconUrl = bm.url.includes('http') ? `https://www.google.com/s2/favicons?domain=${new URL(bm.url).hostname}&sz=32` : ''; } catch(e) {}
-      
+      try { faviconUrl = bm.url.includes('http') ? `https://www.google.com/s2/favicons?domain=${new URL(bm.url).hostname}&sz=32` : ''; } catch (e) { }
+
       item.innerHTML = `
         <img class="bookmark-favicon" src="${faviconUrl}" onerror="this.style.display='none'">
         <div class="bookmark-title">${BrowserUtils.sanitize(bm.title)}</div>
         <button class="bookmark-delete" data-index="${i}">×</button>
       `;
-      
+
       item.addEventListener('click', (e) => {
         if (e.target.classList.contains('bookmark-delete')) return;
         if (window.tabManager) {
@@ -347,7 +387,7 @@ class BookmarksManager {
           this.dropdown.style.display = 'none';
         }
       });
-      
+
       item.querySelector('.bookmark-delete').addEventListener('click', (e) => {
         e.stopPropagation();
         const removedTitle = this.saved[i].title;
@@ -356,14 +396,14 @@ class BookmarksManager {
         this.render();
         if (window.toastManager) window.toastManager.show('🗑️ Bookmark Removed', `"${removedTitle}" was removed from your bookmarks.`, 4000);
       });
-      
+
       this.list.appendChild(item);
     });
   }
 
   bindEvents() {
     if (!this.btnBookmarks || !this.dropdown) return;
-    
+
     this.btnBookmarks.addEventListener('click', (e) => {
       e.stopPropagation();
       if (this.dropdown.style.display === 'none') {
@@ -422,7 +462,7 @@ class HubManager {
     try {
       const saved = JSON.parse(localStorage.getItem('leef_hub_tiles'));
       if (saved && saved.length > 0) return saved;
-    } catch(e) {}
+    } catch (e) { }
     return [...this.defaults];
   }
 
@@ -482,7 +522,7 @@ class HubManager {
     const newCancel = btnCancel.cloneNode(true);
     const newUrlInput = urlInput.cloneNode(true);
     const newOverlay = overlay.cloneNode(true);
-    
+
     btnConfirm.parentNode.replaceChild(newConfirm, btnConfirm);
     btnCancel.parentNode.replaceChild(newCancel, btnCancel);
     urlInput.parentNode.replaceChild(newUrlInput, urlInput);
@@ -514,7 +554,7 @@ class HubManager {
     newOverlay.addEventListener('click', (e) => {
       if (e.target === newOverlay) close();
     });
-    
+
     newOverlay.style.display = 'flex';
     nameInput.focus();
   }
@@ -580,7 +620,7 @@ class NewsService {
               this.shownIndices.push(i);
             }
             this.renderCards();
-          } catch(e) { container.innerHTML = '<p style="opacity: 0.6; padding-left: 10px;">Failed to parse latest news.</p>'; }
+          } catch (e) { container.innerHTML = '<p style="opacity: 0.6; padding-left: 10px;">Failed to parse latest news.</p>'; }
         });
       }).on('error', () => { this.isLoading = false; container.innerHTML = '<p style="opacity: 0.6; padding-left: 10px;">Failed to load latest news.</p>'; });
     } catch (e) { this.isLoading = false; container.innerHTML = '<p style="opacity: 0.6; padding-left: 10px;">Offline news mode.</p>'; }
@@ -647,7 +687,8 @@ class TabManager {
     this.tabs = [];
     this.activeTabId = null;
     this.tabCounter = 0;
-    
+    this.lastTabOpen = { url: '', time: 0 };
+
     this.bindGlobalEvents();
   }
 
@@ -658,14 +699,22 @@ class TabManager {
   applyZoomToAll(zoom) {
     this.tabs.forEach(t => {
       if (t.webviewEl && typeof t.webviewEl.setZoomFactor === 'function') {
-        try { t.webviewEl.setZoomFactor(zoom); } catch(e){}
+        try { t.webviewEl.setZoomFactor(zoom); } catch (e) { }
       }
     });
   }
 
   createTab(route = 'home') {
+    // URL Debounce: Prevent the exact same URL from opening twice within 500ms
+    // Fixes "double tabs" caused by click interceptors fighting with native handlers.
+    const now = Date.now();
+    if (route !== 'home' && route === this.lastTabOpen.url && (now - this.lastTabOpen.time) < 500) {
+      return;
+    }
+    this.lastTabOpen = { url: route, time: now };
+
     const isInternal = ['home', 'settings', 'changelog', 'credits', 'flags'].includes(route);
-    
+
     // Hide labs view when navigating away
     const labsView = document.getElementById('flags-view');
     if (labsView) labsView.style.display = 'none';
@@ -686,13 +735,13 @@ class TabManager {
     tabEl.addEventListener('dragover', (e) => {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
-      
+
       const draggingTab = document.querySelector('.tab-dragging');
       if (!draggingTab || draggingTab === tabEl) return;
 
       const rect = tabEl.getBoundingClientRect();
       const midPoint = rect.left + rect.width / 2;
-      
+
       if (e.clientX < midPoint) {
         tabEl.parentNode.insertBefore(draggingTab, tabEl);
       } else {
@@ -713,15 +762,15 @@ class TabManager {
     const tabTitle = document.createElement('span');
     tabTitle.className = 'tab-title';
     tabTitle.textContent = route === 'home' ? 'Leef Browser | Home' : (route === 'settings' ? 'Settings' : (route === 'changelog' ? "What's New" : (route === 'credits' ? 'Credits' : (route === 'flags' ? 'Leef Labs' : 'Loading...'))));
-    
+
     const tabClose = document.createElement('button');
     tabClose.className = 'tab-close';
     tabClose.innerHTML = '×';
-    
+
     tabEl.appendChild(tabTitle);
     tabEl.appendChild(tabClose);
     UI.tabsContainer.insertBefore(tabEl, UI.buttons.newTab);
-    
+
     const tabObj = {
       id: tabId,
       url: route, // 'home', 'settings', 'changelog', or 'https://...'
@@ -731,10 +780,30 @@ class TabManager {
       webviewEl: null, // Lazy loaded
       canGoBack: false,
       canGoForward: false,
-      isInternal: isInternal
+      isInternal: isInternal,
+      isPinned: false,
+      isMuted: false,
+      isAudioPlaying: false
     };
-    
+
     this.tabs.push(tabObj);
+
+    // Audio Indicator Element
+    const tabAudioIcon = document.createElement('div');
+    tabAudioIcon.className = 'tab-audio-icon';
+    tabAudioIcon.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>';
+    tabAudioIcon.style.display = 'none';
+    tabEl.appendChild(tabAudioIcon);
+    tabObj.audioIconEl = tabAudioIcon;
+
+    // Pin Indicator Element
+    const tabPinIcon = document.createElement('div');
+    tabPinIcon.className = 'tab-pin-icon';
+    tabPinIcon.innerHTML = '📌';
+    tabPinIcon.style.display = 'none';
+    tabPinIcon.style.fontSize = '12px';
+    tabEl.appendChild(tabPinIcon);
+    tabObj.pinIconEl = tabPinIcon;
 
     // Initial Routing setup
     if (!isInternal) {
@@ -747,8 +816,32 @@ class TabManager {
     tabEl.addEventListener('click', (e) => {
       if (e.target !== tabClose) this.switchTab(tabId);
     });
-    tabClose.addEventListener('click', () => this.closeTab(tabId));
-    
+
+    tabEl.addEventListener('auxclick', (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.closeTab(tabId);
+      }
+    });
+
+    tabEl.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        window.require('electron').ipcRenderer.send('show-tab-context-menu', {
+          tabId: tabId,
+          isPinned: tabObj.isPinned,
+          isMuted: tabObj.isMuted
+        });
+      } catch (err) { }
+    });
+
+    tabClose.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.closeTab(tabId);
+    });
+
     this.switchTab(tabId);
   }
 
@@ -757,8 +850,9 @@ class TabManager {
     tab.webviewEl = document.createElement('webview');
     tab.webviewEl.id = 'webview-' + tab.id;
     tab.webviewEl.setAttribute('allowpopups', '');
+    tab.webviewEl.setAttribute('partition', 'persist:leef-session'); // CRITICAL: must match session in main.js
     UI.views.webviewsContainer.appendChild(tab.webviewEl);
-    
+
     tab.webviewEl.addEventListener('did-start-loading', () => {
       tab.title = 'Loading...';
       tab.url = tab.webviewEl.src;
@@ -784,7 +878,7 @@ class TabManager {
       tab.canGoBack = tab.webviewEl.canGoBack();
       tab.canGoForward = tab.webviewEl.canGoForward();
       if (typeof tab.webviewEl.setZoomFactor === 'function') {
-         try { tab.webviewEl.setZoomFactor(parseFloat(this.settings.currentSettings.zoom) || 1.0); } catch(e){}
+        try { tab.webviewEl.setZoomFactor(parseFloat(this.settings.currentSettings.zoom) || 1.0); } catch (e) { }
       }
       this.updateTabUI(tab);
 
@@ -806,68 +900,148 @@ class TabManager {
           }, true);
         })();
       `);
-      
-      //  AI Overview Blocking (again, johan this needs to be redone please k love ya)
+
+      // ROBUST AI OVERVIEW BLOCKER (v2.0)
       if (this.settings.currentSettings.blockAIOverview && tab.url.includes('google.com')) {
         tab.webviewEl.executeJavaScript(`
           (function() {
-            const hookInputs = () => {
-              const inputs = document.querySelectorAll('input[name="q"], textarea[name="q"]');
-              inputs.forEach(input => {
-                if (input.dataset.noaiHooked) return;
-                input.dataset.noaiHooked = "true";
-                
-                const proto = Object.getPrototypeOf(input);
-                const descriptor = Object.getOwnPropertyDescriptor(proto, 'value') || 
-                                   Object.getOwnPropertyDescriptor(input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value');
-                
-                if (descriptor) {
-                  Object.defineProperty(input, 'value', {
-                    get: function() {
-                      let val = descriptor.get.call(this);
-                      return val ? val.replace(/( ?)-noai/gi, '') : val;
-                    },
-                    set: function(val) {
-                      if (val && typeof val === 'string') val = val.replace(/( ?)-noai/gi, '');
-                      descriptor.set.call(this, val);
-                    }
-                  });
-                  // Clean whatever is currently there natively
-                  descriptor.set.call(input, descriptor.get.call(input).replace(/( ?)-noai/gi, ''));
+            if (window.__leefAIHooked) return;
+            window.__leefAIHooked = true;
+
+            const NOAI_TAG = ' -noai';
+            const NOAI_REGEX = /( ?)-noai/gi;
+
+            // 1. Intercept search inputs to keep the tag hidden from user view
+            const hookInput = (input) => {
+              if (input.dataset.leefHooked) return;
+              input.dataset.leefHooked = "true";
+              
+              const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value');
+              if (!descriptor) return;
+
+              Object.defineProperty(input, 'value', {
+                get: function() {
+                  const val = descriptor.get.call(this);
+                  return val ? val.replace(NOAI_REGEX, '') : val;
+                },
+                set: function(val) {
+                  const cleanVal = (val && typeof val === 'string') ? val.replace(NOAI_REGEX, '') : val;
+                  descriptor.set.call(this, cleanVal);
                 }
               });
+              
+              // Clean initial value
+              const initial = descriptor.get.call(input);
+              if (initial) descriptor.set.call(input, initial.replace(NOAI_REGEX, ''));
             };
-            hookInputs();
-            // Lightweight check for dynamic element replacements
-            setInterval(hookInputs, 1000); 
 
-            // Prevent Google from submitting batched AJAX queries that bypass our Network filter
-            const triggerSearch = (query) => {
+            // 2. Intercept Form Submissions (Most robust way to catch dynamic searches)
+            const interceptSearch = (query) => {
               if (!query) return;
-              if (!query.toLowerCase().includes('-noai')) query += ' -noai';
-              window.location.href = '/search?q=' + encodeURIComponent(query);
+              const clean = query.replace(NOAI_REGEX, '').trim();
+              window.location.href = '/search?q=' + encodeURIComponent(clean + NOAI_TAG);
             };
 
-            // Intercept Enter key
-            document.addEventListener('keydown', (e) => {
-              if (e.key === 'Enter' && e.target.name === 'q') {
-                e.stopPropagation();
+            document.addEventListener('submit', (e) => {
+              const qInput = e.target.querySelector('input[name="q"], textarea[name="q"]');
+              if (qInput) {
                 e.preventDefault();
-                triggerSearch(e.target.value);
+                e.stopPropagation();
+                interceptSearch(qInput.value);
               }
             }, true);
+
+            // 3. Catch Enter Key as a fallback
+            document.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter' && e.target.name === 'q') {
+                e.preventDefault();
+                e.stopPropagation();
+                interceptSearch(e.target.value);
+              }
+            }, true);
+
+            // 4. Watch for dynamic search bars (Google swaps them often)
+            const observer = new MutationObserver(() => {
+              document.querySelectorAll('input[name="q"], textarea[name="q"]').forEach(hookInput);
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+            document.querySelectorAll('input[name="q"], textarea[name="q"]').forEach(hookInput);
           })();
         `);
       }
 
-      // Show YouTube quality/adblock warning toast once per session
-      if (window.toastManager && tab.url && tab.url.includes('youtube.com')) {
-        window.toastManager.showOnce(
-          'youtube-4k',
-          'YouTube Performance & Ad-Blocking',
-          'YouTube may reduce video quality or block playback if an ad-blocker is detected. Performance may also slow down above 1440p.'
-        );
+      // YouTube Ad-Skip Script
+      if (tab.url && tab.url.includes('youtube.com')) {
+        const injectYTAdBlock = () => {
+          tab.webviewEl.executeJavaScript(`
+            (function() {
+              if (window.__leefYTAdBlock) return;
+              window.__leefYTAdBlock = true;
+
+              function skipAd() {
+                // 1. Click skip button (multiple selectors for different YT versions)
+                const skipBtn = document.querySelector(
+                  '.ytp-skip-ad-button__text, .ytp-ad-skip-button-modern, .ytp-ad-skip-button, .ytp-skip-ad-button'
+                );
+                if (skipBtn) { skipBtn.click(); return; }
+
+                // 2. For unskippable ads — mute and seek to end
+                const player = document.querySelector('.ad-showing video');
+                if (player && player.duration && !isNaN(player.duration) && isFinite(player.duration)) {
+                  player.muted = true;
+                  player.currentTime = player.duration;
+                }
+
+                // 3. Dismiss anti-adblock enforcement modal
+                const enforceBtn = document.querySelector(
+                  'ytd-enforcement-message-view-model button[class*="dismiss"], ' +
+                  'tp-yt-paper-dialog .style-scope ytd-button-renderer:last-child button'
+                );
+                if (enforceBtn) enforceBtn.click();
+
+                // 4. Hide overlay banner ads (Download Chrome, etc) and feed ads
+                if (!document.getElementById('__leef_yt_css')) {
+                  const s = document.createElement('style');
+                  s.id = '__leef_yt_css';
+                  s.textContent = \`
+                    .ytp-ad-overlay-container, .ytp-ad-text-overlay,
+                    .ytp-ad-image-overlay, .ytp-ce-element,
+                    #masthead-ad, ytd-banner-promo-renderer,
+                    ytd-statement-banner-renderer, ytd-ad-slot-renderer,
+                    ytd-in-feed-ad-layout-renderer, ytd-promoted-sparkles-web-renderer,
+                    ytd-search-pyv-renderer, #player-ads { 
+                      display: none !important; 
+                    }
+                  \`;
+                  document.head.appendChild(s);
+                }
+              }
+
+              setInterval(skipAd, 500);
+              skipAd();
+            })();
+          `).catch(() => {});
+        };
+
+        // Inject on initial load
+        injectYTAdBlock();
+
+        // Re-inject on every SPA navigation (clicking a video within YouTube)
+        if (!tab._ytNavHooked) {
+          tab._ytNavHooked = true;
+          tab.webviewEl.addEventListener('did-navigate-in-page', () => {
+            if (tab.webviewEl.getURL().includes('youtube.com')) {
+              tab.webviewEl.executeJavaScript('window.__leefYTAdBlock = false;').catch(() => {});
+              setTimeout(injectYTAdBlock, 500);
+            }
+          });
+        }
       }
+
+
+      // Audio status monitoring
+      tab.webviewEl.addEventListener('media-paused', () => { tab.isAudioPlaying = false; this.updateTabUI(tab); });
+      tab.webviewEl.addEventListener('media-started-playing', () => { tab.isAudioPlaying = true; this.updateTabUI(tab); });
     });
 
     // Right-Click Context Menu for Webviews
@@ -875,7 +1049,7 @@ class TabManager {
       e.preventDefault();
       try {
         window.require('electron').ipcRenderer.send('show-context-menu', e.params);
-      } catch(err) {}
+      } catch (err) { }
     });
 
     // Fullscreen: hide/show browser chrome when a page requests fullscreen.
@@ -891,15 +1065,22 @@ class TabManager {
 
   navigateToUrl(rawInput) {
     if (!rawInput || !rawInput.trim()) return; // guard empty input
+    
+    // Hide address bar suggestions and remove focus when navigating
+    if (window.addressBarManager && window.addressBarManager.suggestionsEl) {
+      window.addressBarManager.suggestionsEl.style.display = 'none';
+    }
+    if (UI.inputs.address) UI.inputs.address.blur();
+
     const tab = this.getActiveTab();
     if (!tab) return;
     const fullUrl = BrowserUtils.parseAddress(rawInput.trim(), this.settings.currentSettings.searchEngine, this.settings.currentSettings.blockAIOverview);
-    
+
     if (!tab.webviewEl) {
       // Lazy load instantiation
       this.mountWebview(tab);
     }
-    
+
     tab.isInternal = false;
     tab.url = fullUrl;
     tab.webviewEl.src = fullUrl;
@@ -924,11 +1105,29 @@ class TabManager {
         // Strip -noai from the address bar for a seamless display
         let displayUrl = tab.url;
         if (this.settings.currentSettings.blockAIOverview && displayUrl.includes('google.com/search')) {
-           displayUrl = displayUrl.replace(/(\+|\%20)-noai/g, '');
+          displayUrl = displayUrl.replace(/(\+|\%20)-noai/g, '');
         }
         UI.inputs.address.value = displayUrl;
       }
       else UI.inputs.address.value = '';
+    }
+
+    // Audio Indicator
+    if (tab.audioIconEl) {
+      tab.audioIconEl.style.display = tab.isAudioPlaying ? 'block' : 'none';
+      tab.audioIconEl.style.color = tab.isMuted ? 'rgba(0,0,0,0.3)' : 'var(--primary-color)';
+    }
+
+    // Favicon for pinned tabs
+    if (tab.isPinned && !tab.isInternal) {
+      let faviconUrl = '';
+      try { faviconUrl = `https://www.google.com/s2/favicons?domain=${new URL(tab.url).hostname}&sz=32`; } catch (e) { }
+      tab.tabEl.style.backgroundImage = `url(${faviconUrl})`;
+      tab.tabEl.style.backgroundSize = '18px';
+      tab.tabEl.style.backgroundPosition = 'center';
+      tab.tabEl.style.backgroundRepeat = 'no-repeat';
+    } else {
+      tab.tabEl.style.backgroundImage = 'none';
     }
   }
 
@@ -937,7 +1136,7 @@ class TabManager {
     this.activeTabId = tabId;
     const tab = this.getActiveTab();
     if (!tab) return;
-    
+
     // Only suspend the previously active tab (not all tabs — avoids O(n) executeJavaScript calls because that one tester kept doing it)
     if (prevTabId && prevTabId !== tabId && this.settings.currentSettings.backgroundLimit) {
       const prevTab = this.tabs.find(t => t.id === prevTabId);
@@ -949,7 +1148,7 @@ class TabManager {
               if (!m.paused) { m.pause(); m.dataset.wasPlayingByLeef = "true"; }
             });
           `);
-        } catch(e) {}
+        } catch (e) { }
       }
     }
 
@@ -962,8 +1161,8 @@ class TabManager {
 
     // Restore active tab audio and resume paused media
     if (tab.webviewEl) {
-      try { 
-        tab.webviewEl.setAudioMuted(false); 
+      try {
+        tab.webviewEl.setAudioMuted(false);
         if (this.settings.currentSettings.backgroundLimit) {
           tab.webviewEl.executeJavaScript(`
             document.querySelectorAll('video, audio').forEach(m => {
@@ -971,32 +1170,32 @@ class TabManager {
             });
           `);
         }
-      } catch(e) {}
+      } catch (e) { }
     }
-    
+
     // Manage Views
     UI.views.home.style.display = tab.url === 'home' ? 'flex' : 'none';
     UI.views.settings.style.display = tab.url === 'settings' ? 'flex' : 'none';
     UI.views.changelog.style.display = tab.url === 'changelog' ? 'flex' : 'none';
     UI.views.credits.style.display = tab.url === 'credits' ? 'flex' : 'none';
-    
+
     const labsView = document.getElementById('flags-view');
     if (labsView) labsView.style.display = tab.url === 'flags' ? 'flex' : 'none';
-    
+
     if (tab.isInternal) {
       UI.views.webviewsContainer.classList.remove('active');
     } else {
       UI.views.webviewsContainer.classList.add('active');
       if (tab.webviewEl) tab.webviewEl.classList.add('active');
     }
-    
+
     this.updateTabUI(tab);
   }
 
   closeTab(tabId) {
     const index = this.tabs.findIndex(t => t.id === tabId);
     if (index === -1) return;
-    
+
     const tab = this.tabs[index];
     // Clean up webview to prevent memory leaks
     if (tab.webviewEl) {
@@ -1009,7 +1208,7 @@ class TabManager {
     tab.tabEl = null;
     tab.tabTitle = null;
     this.tabs.splice(index, 1);
-    
+
     if (this.tabs.length === 0) {
       this.createTab('home');
     } else if (this.activeTabId === tabId) {
@@ -1018,8 +1217,15 @@ class TabManager {
   }
 
   bindGlobalEvents() {
+    UI.tabsContainer.addEventListener('contextmenu', (e) => {
+      if (e.target === UI.tabsContainer) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    });
+
     UI.buttons.newTab.addEventListener('click', () => this.createTab('home'));
-    
+
     if (UI.buttons.settings) UI.buttons.settings.addEventListener('click', () => this.createTab('settings'));
     if (UI.buttons.whatsNew) UI.buttons.whatsNew.addEventListener('click', () => this.createTab('changelog'));
     if (UI.buttons.credits) UI.buttons.credits.addEventListener('click', () => this.createTab('credits'));
@@ -1033,7 +1239,7 @@ class TabManager {
       window.require('electron').ipcRenderer.on('context-menu-command', (event, data) => {
         const tab = this.getActiveTab();
         if (!tab) return;
-        
+
         switch (data.command) {
           case 'go-back':
             if (tab.webviewEl && tab.webviewEl.canGoBack()) tab.webviewEl.goBack();
@@ -1064,12 +1270,35 @@ class TabManager {
             break;
         }
       });
-    } catch(e) {}
+
+      window.require('electron').ipcRenderer.on('tab-command', (event, data) => {
+        const tab = this.tabs.find(t => t.id === data.tabId);
+        if (!tab) return;
+
+        switch (data.command) {
+          case 'duplicate':
+            this.createTab(tab.url);
+            break;
+          case 'toggle-pin':
+            this.togglePin(tab);
+            break;
+          case 'toggle-mute':
+            this.toggleMute(tab);
+            break;
+          case 'close':
+            this.closeTab(tab.id);
+            break;
+          case 'close-others':
+            this.tabs.filter(t => t.id !== tab.id).forEach(t => this.closeTab(t.id));
+            break;
+        }
+      });
+    } catch (e) { }
 
     // Global context menu for non-webview areas (Home, Settings, etc.)
     window.addEventListener('contextmenu', (e) => {
       if (e.target.tagName === 'WEBVIEW') return;
-      
+
       const params = {
         x: e.x,
         y: e.y,
@@ -1079,10 +1308,10 @@ class TabManager {
         canGoForward: false,
         editFlags: {}
       };
-      
+
       try {
         window.require('electron').ipcRenderer.send('show-context-menu', params);
-      } catch(err) {}
+      } catch (err) { }
     });
 
     // Address Bar
@@ -1111,14 +1340,45 @@ class TabManager {
   syncInternalOrder() {
     const tabElements = Array.from(UI.tabsContainer.querySelectorAll('.tab'));
     const newTabsOrder = [];
-    
+
     tabElements.forEach(el => {
       const tabId = el.dataset.tabId;
       const t = this.tabs.find(tab => tab.id === tabId);
       if (t) newTabsOrder.push(t);
     });
-    
+
     this.tabs = newTabsOrder;
+  }
+
+  togglePin(tab) {
+    tab.isPinned = !tab.isPinned;
+    tab.tabEl.classList.toggle('pinned', tab.isPinned);
+    if (tab.pinIconEl) tab.pinIconEl.style.display = tab.isPinned ? 'block' : 'none';
+
+    // Sort pinned tabs to the front
+    if (tab.isPinned) {
+      UI.tabsContainer.insertBefore(tab.tabEl, UI.tabsContainer.firstChild);
+    } else {
+      // Move after last pinned tab or to start of unpinned
+      const lastPinned = Array.from(UI.tabsContainer.querySelectorAll('.tab.pinned')).pop();
+      if (lastPinned) {
+        lastPinned.after(tab.tabEl);
+      } else {
+        UI.tabsContainer.insertBefore(tab.tabEl, UI.tabsContainer.firstChild);
+      }
+    }
+
+    this.syncInternalOrder();
+    this.updateTabUI(tab);
+  }
+
+  toggleMute(tab) {
+    if (!tab.webviewEl) return;
+    tab.isMuted = !tab.isMuted;
+    try {
+      tab.webviewEl.setAudioMuted(tab.isMuted);
+    } catch (e) { }
+    this.updateTabUI(tab);
   }
 }
 
@@ -1138,7 +1398,7 @@ class ToastManager {
     if (!this.el) return;
     this.el.querySelector('.leef-toast-title').textContent = title;
     this.el.querySelector('.leef-toast-msg').textContent = msg;
-    
+
     // Reset action div visibility so buttons don't leak between toasts
     const actionDiv = document.getElementById('leef-toast-action');
     if (actionDiv) actionDiv.style.display = 'none';
@@ -1165,6 +1425,8 @@ class DownloadManager {
     this.el = document.getElementById('btn-downloads');
     this.list = document.getElementById('downloads-list');
     this.dropdown = document.getElementById('downloads-dropdown');
+    this.toolbarRing = document.getElementById('toolbar-dl-ring');
+    this.toolbarSvg = document.querySelector('.dl-progress-ring');
     this.downloads = new Map();
     this.bindEvents();
   }
@@ -1205,12 +1467,14 @@ class DownloadManager {
           dl.status = 'completed';
           dl.path = data.path;
           this.renderItem(data.id);
+          this.updateToolbarProgress();
         }
       } else if (data.status === 'failed' || data.status === 'interrupted') {
         const dl = this.downloads.get(data.id);
         if (dl) {
           dl.status = 'failed';
           this.renderItem(data.id);
+          this.updateToolbarProgress();
         }
       }
     });
@@ -1252,6 +1516,35 @@ class DownloadManager {
     const percent = document.querySelector(`#dl-${id} .download-percent`);
     if (pb) pb.style.width = progress + '%';
     if (percent) percent.textContent = progress + '%';
+    this.updateToolbarProgress();
+  }
+
+  updateToolbarProgress() {
+    if (!this.toolbarRing || !this.toolbarSvg) return;
+
+    const active = Array.from(this.downloads.values()).filter(d => d.status === 'started' || d.status === 'progressing');
+
+    if (active.length === 0) {
+      this.toolbarSvg.style.display = 'none';
+      return;
+    }
+
+    this.toolbarSvg.style.display = 'block';
+
+    let totalBytes = 0;
+    let receivedBytes = 0;
+    active.forEach(d => {
+      if (d.total > 0) {
+        totalBytes += d.total;
+        receivedBytes += d.received;
+      }
+    });
+
+    if (totalBytes > 0) {
+      const progress = receivedBytes / totalBytes;
+      const offset = 62.8 - (62.8 * progress);
+      this.toolbarRing.style.strokeDashoffset = offset;
+    }
   }
 }
 
@@ -1259,7 +1552,8 @@ class LabsManager {
   constructor() {
     this.flags = this.loadFlags();
     this.view = document.getElementById('flags-view');
-    this.btnOpen = document.getElementById('btn-open-flags');
+    this.btnOpenFooter = document.getElementById('btn-open-flags');
+    this.btnOpenAdvanced = document.getElementById('btn-open-flags-advanced');
     this.btnApply = document.getElementById('btn-flags-relaunch');
     this.bindEvents();
     this.syncUI();
@@ -1268,7 +1562,7 @@ class LabsManager {
   loadFlags() {
     try {
       return JSON.parse(localStorage.getItem('leef_labs_flags') || '{}');
-    } catch(e) { return {}; }
+    } catch (e) { return {}; }
   }
 
   saveFlags() {
@@ -1277,13 +1571,9 @@ class LabsManager {
   }
 
   bindEvents() {
-    if (this.btnOpen) {
-      this.btnOpen.addEventListener('click', () => {
-        if (window.tabManager) {
-          window.tabManager.createTab('flags');
-        }
-      });
-    }
+    const openFlags = () => { if (window.tabManager) window.tabManager.createTab('flags'); };
+    if (this.btnOpenFooter) this.btnOpenFooter.addEventListener('click', openFlags);
+    if (this.btnOpenAdvanced) this.btnOpenAdvanced.addEventListener('click', openFlags);
 
     if (this.btnApply) {
       this.btnApply.addEventListener('click', () => {
@@ -1311,13 +1601,348 @@ class LabsManager {
   }
 }
 
+class HeroManager {
+  constructor() {
+    this.clockEl = document.getElementById('home-clock');
+    this.greetingEl = document.getElementById('home-greeting');
+    if (this.clockEl && this.greetingEl) {
+      this.start();
+    }
+  }
+
+  start() {
+    this.update();
+    setInterval(() => this.update(), 1000);
+  }
+
+  update() {
+    const now = new Date();
+    const hours = now.getHours();
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+
+    if (this.clockEl) this.clockEl.textContent = `${hours % 12 || 12}:${minutes}`;
+
+    if (this.greetingEl) {
+      let greet = 'Good Evening';
+      if (hours < 12) greet = 'Good Morning';
+      else if (hours < 17) greet = 'Good Afternoon';
+      else if (hours > 21) greet = 'Good Night';
+      this.greetingEl.textContent = greet;
+    }
+  }
+}
+
+class AddressBarManager {
+  constructor(bookmarksManager) {
+    this.bookmarksManager = bookmarksManager;
+    this.input = document.getElementById('address-input');
+    
+    // Create a body-level suggestions container to completely bypass CSS clipping/stacking issues
+    this.suggestionsEl = document.createElement('div');
+    this.suggestionsEl.className = 'address-suggestions';
+    this.suggestionsEl.style.display = 'none';
+    this.suggestionsEl.style.position = 'absolute';
+    this.suggestionsEl.style.zIndex = '999999';
+    document.body.appendChild(this.suggestionsEl);
+
+    this.selectedIndex = -1;
+    this.currentFetchCtrl = null;
+    this.bindEvents();
+
+    // Re-position on resize
+    window.addEventListener('resize', () => {
+      if (this.suggestionsEl.style.display !== 'none') this.updatePosition();
+    });
+  }
+
+  updatePosition() {
+    if (!this.input) return;
+    const rect = this.input.parentElement.getBoundingClientRect();
+    this.suggestionsEl.style.top = (rect.bottom + 5) + 'px';
+    this.suggestionsEl.style.left = rect.left + 'px';
+    this.suggestionsEl.style.width = rect.width + 'px';
+  }
+
+  bindEvents() {
+    if (!this.input) return;
+
+    this.input.addEventListener('input', () => this.showSuggestions());
+    this.input.addEventListener('keydown', (e) => this.handleKeydown(e));
+    this.input.addEventListener('blur', () => {
+      setTimeout(() => { this.suggestionsEl.style.display = 'none'; }, 200);
+    });
+    this.input.addEventListener('focus', () => this.showSuggestions());
+  }
+
+  async showSuggestions() {
+    const val = this.input.value.trim();
+    if (!val) {
+      this.suggestionsEl.style.display = 'none';
+      return;
+    }
+
+    this.updatePosition();
+
+    // 1. Local Bookmarks (Fast)
+    const lowerVal = val.toLowerCase();
+    const bookmarkMatches = this.bookmarksManager.saved.filter(b =>
+      b.title.toLowerCase().includes(lowerVal) || b.url.toLowerCase().includes(lowerVal)
+    ).slice(0, 3); // Max 3 bookmarks
+
+    // If autocomplete is disabled, render immediately and stop
+    const settingsMgr = window.tabManager ? window.tabManager.settingsManager : null;
+    const isLiveEnabled = settingsMgr ? settingsMgr.currentSettings.liveAutocomplete : false;
+
+    if (!isLiveEnabled) {
+      this.renderSuggestions(val, bookmarkMatches, []);
+      this.suggestionsEl.style.display = 'block';
+      return;
+    }
+
+    this.renderSuggestions(val, bookmarkMatches, []);
+    this.suggestionsEl.style.display = 'block';
+
+    // 2. Fetch Live Autocomplete from Google (Chrome API)
+    if (this.currentFetchCtrl) this.currentFetchCtrl.abort();
+    this.currentFetchCtrl = new AbortController();
+
+    try {
+      const fetchUrl = 'https://suggestqueries.google.com/complete/search?client=chrome&q=' + encodeURIComponent(val);
+      const res = await fetch(fetchUrl, {
+        signal: this.currentFetchCtrl.signal
+      });
+      const data = await res.json();
+      const webSuggestions = data[1] || [];
+      
+      // Re-render with both bookmarks and web suggestions
+      if (this.input.value.trim() === val) { // Prevent race conditions
+        this.renderSuggestions(val, bookmarkMatches, webSuggestions.slice(0, 6));
+      }
+    } catch (err) {
+      // Ignore abort errors or offline
+    }
+  }
+
+  renderSuggestions(val, bookmarkMatches, webSuggestions) {
+    this.suggestionsEl.innerHTML = '';
+    this.selectedIndex = -1;
+
+    // Helper to add items
+    const addItem = (title, url, iconHtml, isWeb) => {
+      const item = document.createElement('div');
+      item.className = 'suggestion-item';
+      item.innerHTML = iconHtml + '<div class="suggestion-info"><div class="suggestion-title">' + BrowserUtils.sanitize(title) + '</div><div class="suggestion-url" style="' + (isWeb ? 'display:none;' : '') + '">' + BrowserUtils.sanitize(url) + '</div></div>';
+
+      item.addEventListener('click', () => {
+        if (window.tabManager) window.tabManager.navigateToUrl(url || title); // URL for bookmarks, title for queries
+        this.suggestionsEl.style.display = 'none';
+      });
+
+      this.suggestionsEl.appendChild(item);
+    };
+
+    // 1. Fallback / Current Input (Search for...)
+    addItem('Search for "' + val + '"', val, '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 10px; opacity: 0.6; flex-shrink: 0;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>', true);
+
+    // 2. Bookmarks
+    bookmarkMatches.forEach(match => {
+      let faviconUrl = '';
+      try { faviconUrl = 'https://www.google.com/s2/favicons?domain=' + new URL(match.url).hostname + '&sz=32'; } catch (e) { }
+      const icon = '<img class="suggestion-favicon" src="' + faviconUrl + '" onerror="this.style.display=\'none\'">';
+      addItem(match.title, match.url, icon, false);
+    });
+
+    // 3. Web Autocomplete
+    webSuggestions.forEach(suggestion => {
+      if (suggestion.toLowerCase() === val.toLowerCase()) return; // Skip if it's identical to the fallback
+      const icon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 10px; opacity: 0.6; flex-shrink: 0;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>';
+      addItem(suggestion, suggestion, icon, true);
+    });
+  }
+
+  handleKeydown(e) {
+    const items = this.suggestionsEl.querySelectorAll('.suggestion-item');
+    if (this.suggestionsEl.style.display === 'none' || items.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      this.selectedIndex = (this.selectedIndex + 1) % items.length;
+      this.updateSelection(items);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      this.selectedIndex = (this.selectedIndex - 1 + items.length) % items.length;
+      this.updateSelection(items);
+    } else if (e.key === 'Enter' && this.selectedIndex !== -1) {
+      e.preventDefault();
+      items[this.selectedIndex].click();
+    }
+  }
+
+  updateSelection(items) {
+    items.forEach((item, i) => {
+      item.classList.toggle('selected', i === this.selectedIndex);
+    });
+    if (this.selectedIndex !== -1) {
+      const urlEl = items[this.selectedIndex].querySelector('.suggestion-url');
+      const titleEl = items[this.selectedIndex].querySelector('.suggestion-title');
+      // If it's a web suggestion, fill input with the title (query). If bookmark, fill with URL.
+      this.input.value = urlEl.style.display === 'none' ? titleEl.textContent.replace(/^Search for "/, '').replace(/"$/, '') : urlEl.textContent;
+    }
+  }
+}
+
+class PermissionManager {
+  constructor(settingsManager) {
+    this.settingsManager = settingsManager;
+    this.promptOverlay = document.getElementById('permission-prompt-overlay');
+    this.modalTitle = document.getElementById('permission-prompt-title');
+    this.modalMsg = document.getElementById('permission-prompt-msg');
+    this.originEl = document.getElementById('permission-prompt-origin');
+    this.typeEl = document.getElementById('permission-prompt-type');
+    this.btnAllow = document.getElementById('permission-prompt-allow');
+    this.btnDeny = document.getElementById('permission-prompt-deny');
+    
+    this.managerModal = document.getElementById('site-permissions-modal');
+    this.managerList = document.getElementById('site-permissions-list');
+    this.btnManagerClose = document.getElementById('site-permissions-close');
+    this.btnAddSite = document.getElementById('btn-add-site-permission');
+    
+    this.currentReqId = null;
+    this.currentOrigin = null;
+    this.currentPermission = null;
+
+    this.bindEvents();
+  }
+
+  bindEvents() {
+    const ipc = window.require('electron').ipcRenderer;
+    ipc.on('permission-request', (e, data) => {
+      this.currentReqId = data.id;
+      this.currentOrigin = data.origin;
+      this.currentPermission = data.permission;
+      
+      this.originEl.textContent = data.origin;
+      this.typeEl.textContent = data.permission;
+      this.promptOverlay.style.display = 'flex';
+      document.body.classList.add('modal-open');
+
+      // Hide dynamic address bar suggestions so they don't overlap the modal
+      if (window.addressBarManager && window.addressBarManager.suggestionsEl) {
+        window.addressBarManager.suggestionsEl.style.display = 'none';
+      }
+    });
+
+    if(this.btnAllow) this.btnAllow.addEventListener('click', () => this.handleResponse(true));
+    if(this.btnDeny) this.btnDeny.addEventListener('click', () => this.handleResponse(false));
+
+    // Manager bindings
+    document.getElementById('btn-camera-mic')?.addEventListener('click', () => this.openManager());
+    document.getElementById('btn-location')?.addEventListener('click', () => this.openManager());
+    document.getElementById('btn-allowed-sites')?.addEventListener('click', () => this.openManager());
+
+    if (this.btnManagerClose) {
+      this.btnManagerClose.addEventListener('click', () => {
+        this.managerModal.style.display = 'none';
+        document.body.classList.remove('modal-open');
+      });
+    }
+
+    if (this.btnAddSite) {
+      this.btnAddSite.addEventListener('click', () => {
+        const url = prompt("Enter the origin URL (e.g., https://discord.com):");
+        if (url) {
+          try {
+            const origin = new URL(url).origin;
+            this.updateSetting(origin, 'media', true);
+            this.renderManagerList();
+          } catch(e) {
+            if(window.toastManager) window.toastManager.show('Error', 'Invalid URL format.', 3000);
+          }
+        }
+      });
+    }
+  }
+
+  handleResponse(granted) {
+    this.promptOverlay.style.display = 'none';
+    document.body.classList.remove('modal-open');
+    if (this.currentReqId !== null) {
+      window.require('electron').ipcRenderer.send('permission-response', {
+        id: this.currentReqId,
+        granted
+      });
+      this.updateSetting(this.currentOrigin, this.currentPermission, granted);
+      this.currentReqId = null;
+    }
+  }
+
+  updateSetting(origin, permission, granted) {
+    const s = this.settingsManager.currentSettings;
+    if (!s.sitePermissions) s.sitePermissions = {};
+    if (!s.sitePermissions[origin]) s.sitePermissions[origin] = {};
+    s.sitePermissions[origin][permission] = granted;
+    this.settingsManager.saveSettings();
+  }
+
+  openManager() {
+    this.renderManagerList();
+    this.managerModal.style.display = 'flex';
+    document.body.classList.add('modal-open');
+    if (window.addressBarManager && window.addressBarManager.suggestionsEl) {
+      window.addressBarManager.suggestionsEl.style.display = 'none';
+    }
+  }
+
+  renderManagerList() {
+    this.managerList.innerHTML = '';
+    const perms = this.settingsManager.currentSettings.sitePermissions || {};
+    const origins = Object.keys(perms);
+    
+    if (origins.length === 0) {
+      this.managerList.innerHTML = '<p style="padding: 10px; opacity: 0.6; font-size: 0.85rem;">No site permissions saved.</p>';
+      return;
+    }
+
+    origins.forEach(origin => {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.justifyContent = 'space-between';
+      row.style.alignItems = 'center';
+      row.style.padding = '8px';
+      row.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
+
+      let checks = [];
+      if (perms[origin].media !== undefined) checks.push(`Media: ${perms[origin].media ? 'Allow' : 'Block'}`);
+      if (perms[origin].geolocation !== undefined) checks.push(`Location: ${perms[origin].geolocation ? 'Allow' : 'Block'}`);
+      if (perms[origin].notifications !== undefined) checks.push(`Notifs: ${perms[origin].notifications ? 'Allow' : 'Block'}`);
+
+      row.innerHTML = `
+        <div style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          <strong style="font-size: 0.9rem;">${origin}</strong>
+          <div style="font-size: 0.75rem; color: #666;">${checks.join(', ')}</div>
+        </div>
+        <button class="bookmark-delete" style="opacity: 1; font-size: 1.2rem; cursor: pointer; border: none; background: transparent; padding: 5px;" title="Remove rules">×</button>
+      `;
+
+      row.querySelector('button').addEventListener('click', () => {
+        delete perms[origin];
+        this.settingsManager.saveSettings();
+        this.renderManagerList();
+      });
+
+      this.managerList.appendChild(row);
+    });
+  }
+}
+
 // --- BOOTSTRAP ---
 window.onload = () => {
   // ToastManager must be first so all other managers can use it
   window.toastManager = new ToastManager();
 
   const settingsMgr = new SettingsManager();
-  window.tabManager = new TabManager(settingsMgr); 
+  window.permissionManager = new PermissionManager(settingsMgr);
+  window.tabManager = new TabManager(settingsMgr);
   const bookmarksMgr = new BookmarksManager();
   const hubMgr = new HubManager();
   window.newsSvc = new NewsService();
@@ -1351,12 +1976,18 @@ window.onload = () => {
   // Downloads
   window.downloadManager = new DownloadManager();
 
+  // Address Bar Suggestions
+  window.addressBarManager = new AddressBarManager(bookmarksMgr);
+
+  // Hero Section (Clock/Greeting)
+  window.heroManager = new HeroManager();
+
   // Startup behavior
   const startup = settingsMgr.currentSettings.startup || 'newtab';
 
   if (startup === 'continue') {
     let lastTabs = [];
-    try { lastTabs = JSON.parse(localStorage.getItem('leef_last_tabs') || '[]'); } catch(e) {}
+    try { lastTabs = JSON.parse(localStorage.getItem('leef_last_tabs') || '[]'); } catch (e) { }
     if (lastTabs.length > 0) {
       lastTabs.forEach(url => window.tabManager.createTab(url));
     } else {
