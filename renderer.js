@@ -159,8 +159,38 @@ class SettingsManager {
       UI.buttons.clearData.addEventListener('click', () => {
         try {
           window.require('electron').ipcRenderer.send('clear-data');
-          if (window.toastManager) window.toastManager.show('🧹 Data Cleared', 'Your browsing history, cache, and cookies have been cleared securely.', 5000);
+          localStorage.removeItem('leef_onboarding_done');
+          if (window.toastManager) window.toastManager.show('🧹 Data Cleared', 'History, cache, and onboarding status have been cleared.', 5000);
         } catch (e) { }
+      });
+    }
+
+    const btnRedoSetup = document.getElementById('btn-redo-setup');
+    if (btnRedoSetup) {
+      btnRedoSetup.addEventListener('click', () => {
+        localStorage.removeItem('leef_onboarding_done');
+        location.reload();
+      });
+    }
+
+    const btnGenerateLog = document.getElementById('btn-generate-log');
+    if (btnGenerateLog) {
+      btnGenerateLog.addEventListener('click', () => {
+        try {
+          console.log('Generating bug log...');
+          btnGenerateLog.textContent = 'Generating...';
+          btnGenerateLog.disabled = true;
+
+          const payload = {
+            settings: JSON.parse(localStorage.getItem('leef_settings') || '{}'),
+            labs: JSON.parse(localStorage.getItem('leef_labs_flags') || '{}')
+          };
+          window.require('electron').ipcRenderer.send('generate-bug-log', payload);
+        } catch (e) { 
+          console.error('Renderer error in generate-bug-log:', e); 
+          btnGenerateLog.textContent = 'Generate Diagnostics Log';
+          btnGenerateLog.disabled = false;
+        }
       });
     }
     if (UI.buttons.defaultBrowser) {
@@ -195,6 +225,34 @@ class SettingsManager {
 
     // IPC Listeners for v0.1.5 Transparency
     const ipc = window.require('electron').ipcRenderer;
+
+    ipc.on('bug-log-generated', (event, response) => {
+      console.log('Diagnostics response:', response);
+      const btnLog = document.getElementById('btn-generate-log');
+      if (btnLog) {
+        btnLog.textContent = 'Generate Diagnostics Log';
+        btnLog.disabled = false;
+      }
+
+      if (response.success) {
+        if (window.toastManager) {
+          window.toastManager.show('📄 Diagnostics Saved', 
+            `Log saved to Downloads. It contains settings and system info, but <b>NO history or passwords</b>.<br><br><b>WARNING:</b> Only share this file with the <a href="https://forms.gle/upGc1dvPYaoBw4o96" target="_blank">bug report form</a> or <b>contact.qtech@proton.me</b>.`, 
+            15000);
+        }
+
+        // Ask to open the form
+        setTimeout(() => {
+          if (confirm('Diagnostics log generated! This file contains your settings and system info, but NO history or passwords. \n\nWould you like to open the bug report form now to upload it?')) {
+            if (window.tabManager) window.tabManager.createTab('https://forms.gle/upGc1dvPYaoBw4o96');
+          }
+        }, 500);
+      } else {
+        if (window.toastManager) {
+          window.toastManager.show('❌ Generation Failed', `Could not create the log file: ${response.error}`, 5000);
+        }
+      }
+    });
     ipc.on('adblock-status', (event, status) => {
       const badge = document.getElementById('adblock-status-badge');
       const btn = document.getElementById('btn-refresh-adblock');
@@ -455,6 +513,7 @@ class HubManager {
       { name: 'Disney +', url: 'https://disneyplus.com', cls: 'hub-tile-disney' },
     ];
     this.tiles = this.loadTiles();
+    this.bindModalEvents();
     this.render();
   }
 
@@ -470,12 +529,68 @@ class HubManager {
     localStorage.setItem('leef_hub_tiles', JSON.stringify(this.tiles));
   }
 
+  bindModalEvents() {
+    this.modal = document.getElementById('hub-add-modal');
+    this.nameInput = document.getElementById('hub-add-name');
+    this.urlInput = document.getElementById('hub-add-url');
+    this.btnConfirm = document.getElementById('hub-add-confirm');
+    this.btnCancel = document.getElementById('hub-add-cancel');
+    this.colorOpts = document.querySelectorAll('.color-opt');
+
+    if (!this.modal) return;
+
+    this.btnCancel.addEventListener('click', () => this.closeModal());
+    
+    this.btnConfirm.addEventListener('click', () => {
+      const name = this.nameInput.value.trim();
+      const url = this.urlInput.value.trim();
+      const activeColor = document.querySelector('.color-opt.active')?.dataset.color || '#92ff78';
+
+      if (!name || !url) {
+        if (window.toastManager) window.toastManager.show('⚠️ Missing Info', 'Please enter both a name and URL.', 3000);
+        return;
+      }
+
+      const fullUrl = url.startsWith('http') ? url : 'https://' + url;
+      this.tiles.push({ name, url: fullUrl, cls: 'hub-tile-custom', color: activeColor });
+      this.saveTiles();
+      this.render();
+      this.closeModal();
+      if (window.toastManager) window.toastManager.show('✅ Tile Added', `"${name}" has been added to your Hub.`, 4000);
+    });
+
+    this.urlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') this.btnConfirm.click();
+    });
+
+    this.modal.addEventListener('click', (e) => {
+      if (e.target === this.modal) this.closeModal();
+    });
+
+    // Color options
+    this.colorOpts.forEach(opt => {
+      opt.addEventListener('click', () => {
+        this.colorOpts.forEach(o => o.classList.remove('active'));
+        opt.classList.add('active');
+      });
+    });
+  }
+
   render() {
     if (!this.gridEl) return;
     this.gridEl.innerHTML = '';
     this.tiles.forEach((tile, i) => {
       const el = document.createElement('div');
       el.className = `hub-tile ${tile.cls || 'hub-tile-custom'}`;
+      
+      // Apply custom color if present
+      if (tile.color) {
+        el.style.backgroundColor = tile.color;
+        el.style.backgroundImage = 'none';
+        // Adjust text color for visibility if needed
+        if (tile.color === '#555555' || tile.color === '#333333') el.style.color = '#fff';
+      }
+
       el.innerHTML = `
         ${tile.subtitle ? `<div>${BrowserUtils.sanitize(tile.name)}</div><div class="small-text">${BrowserUtils.sanitize(tile.subtitle)}</div>` : BrowserUtils.sanitize(tile.name)}
         <button class="hub-tile-remove" data-idx="${i}" title="Remove">&times;</button>
@@ -504,59 +619,21 @@ class HubManager {
   }
 
   promptAddTile() {
-    const overlay = document.getElementById('hub-add-modal');
-    const nameInput = document.getElementById('hub-add-name');
-    const urlInput = document.getElementById('hub-add-url');
-    const btnConfirm = document.getElementById('hub-add-confirm');
-    const btnCancel = document.getElementById('hub-add-cancel');
-    if (!overlay) return;
+    if (!this.modal) return;
+    this.nameInput.value = '';
+    this.urlInput.value = '';
+    // Reset colors
+    this.colorOpts.forEach(o => o.classList.remove('active'));
+    document.querySelector('.color-opt[data-color="#92ff78"]')?.classList.add('active');
 
-    // Reset and show
-    nameInput.value = '';
-    urlInput.value = '';
-    overlay.style.display = 'flex';
-    nameInput.focus();
+    this.modal.style.display = 'flex';
+    document.body.classList.add('modal-open');
+    this.nameInput.focus();
+  }
 
-    // Clean up old listeners to prevent stacking
-    const newConfirm = btnConfirm.cloneNode(true);
-    const newCancel = btnCancel.cloneNode(true);
-    const newUrlInput = urlInput.cloneNode(true);
-    const newOverlay = overlay.cloneNode(true);
-
-    btnConfirm.parentNode.replaceChild(newConfirm, btnConfirm);
-    btnCancel.parentNode.replaceChild(newCancel, btnCancel);
-    urlInput.parentNode.replaceChild(newUrlInput, urlInput);
-    overlay.parentNode.replaceChild(newOverlay, overlay);
-
-    const close = () => { newOverlay.style.display = 'none'; };
-
-    newCancel.addEventListener('click', close);
-    newConfirm.addEventListener('click', () => {
-      const name = nameInput.value.trim();
-      const url = newUrlInput.value.trim();
-      if (!name || !url) {
-        if (window.toastManager) window.toastManager.show('⚠️ Missing Info', 'Please enter both a name and URL.', 3000);
-        return;
-      }
-      const fullUrl = url.startsWith('http') ? url : 'https://' + url;
-      this.tiles.push({ name, url: fullUrl, cls: 'hub-tile-custom' });
-      this.saveTiles();
-      this.render();
-      close();
-      if (window.toastManager) window.toastManager.show('✅ Tile Added', `"${name}" has been added to your Hub.`, 4000);
-    });
-
-    // Allow Enter key to submit
-    newUrlInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') newConfirm.click();
-    });
-    // Allow clicking overlay backdrop to cancel
-    newOverlay.addEventListener('click', (e) => {
-      if (e.target === newOverlay) close();
-    });
-
-    newOverlay.style.display = 'flex';
-    nameInput.focus();
+  closeModal() {
+    this.modal.style.display = 'none';
+    document.body.classList.remove('modal-open');
   }
 }
 
@@ -1941,6 +2018,38 @@ window.onload = () => {
   window.toastManager = new ToastManager();
 
   const settingsMgr = new SettingsManager();
+
+  // First-Time Startup Onboarding
+  if (!localStorage.getItem('leef_onboarding_done')) {
+    const overlay = document.getElementById('onboarding-overlay');
+    if (overlay) {
+      overlay.style.display = 'flex';
+      
+      document.getElementById('btn-onboarding-finish').addEventListener('click', () => {
+        const aiChecked = document.getElementById('onboard-ai').checked;
+        const autoChecked = document.getElementById('onboard-autocomplete').checked;
+        const adblockVal = document.querySelector('input[name="onboard-adblock-tier"]:checked')?.value || 'none';
+        
+        // Sync to actual settings DOM
+        const blockAiEl = document.getElementById('block-ai');
+        if (blockAiEl) blockAiEl.checked = aiChecked;
+        
+        const autoEl = document.getElementById('live-autocomplete');
+        if (autoEl) autoEl.checked = autoChecked;
+        
+        // Adblock is radio buttons ('none', 'basic', 'comprehensive')
+        document.querySelectorAll('input[name="adblock-tier"]').forEach(r => {
+          r.checked = r.value === adblockVal;
+        });
+        
+        settingsMgr.saveSettings();
+        
+        localStorage.setItem('leef_onboarding_done', 'true');
+        overlay.style.display = 'none';
+      });
+    }
+  }
+
   window.permissionManager = new PermissionManager(settingsMgr);
   window.tabManager = new TabManager(settingsMgr);
   const bookmarksMgr = new BookmarksManager();

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, session, ipcMain, Menu, MenuItem, clipboard, nativeImage } from 'electron';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { ElectronBlocker } from '@ghostery/adblocker-electron';
@@ -7,6 +8,7 @@ import fetch from 'cross-fetch';
 
 // SET IDENTITY AS EARLY AS POSSIBLE (Critical for Windows Taskbar)
 app.name = 'Leef Browser';
+app.setName('Leef Browser'); // Reinforce name for jump lists
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.quinn.leefbrowser');
 }
@@ -34,7 +36,7 @@ let adblockerLoading = false;
 
 async function initAdBlocker(enabled = false) {
   const sess = session.fromPartition('persist:leef-session');
-  
+
   if (!enabled) {
     if (blocker && adblockerEnabled) {
       blocker.disableBlockingInSession(sess);
@@ -73,11 +75,11 @@ async function initAdBlocker(enabled = false) {
       console.log('AdBlocker: Downloading filter lists...');
       blocker = await ElectronBlocker.fromLists(fetchWithTimeout, lists);
       console.log('AdBlocker: Engine compiled successfully with', lists.length, 'lists.');
-      
+
       fs.writeFileSync(cachePath, blocker.serialize());
       if (mainWindow) mainWindow.webContents.send('adblock-status', 'updated');
     }
-    
+
     // Enable cosmetic filtering and IPC handlers (Once)
     blocker.enableBlockingInSession(sess);
     adblockerEnabled = true;
@@ -93,7 +95,7 @@ async function checkForUpdates(manual = false) {
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
     const currentVersion = pkg.version;
-    
+
     // Add an artificial delay for manual checks so the user actually sees the UI update
     if (manual) {
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -102,11 +104,11 @@ async function checkForUpdates(manual = false) {
     const response = await fetch('https://api.github.com/repos/git-QTech/leef/releases', {
       headers: { 'User-Agent': 'Leef-Browser-Update-Checker' }
     });
-    
+
     if (!response.ok) {
       throw new Error(`GitHub API returned status ${response.status}`);
     }
-    
+
     const data = await response.json();
     if (!data || data.length === 0) {
       throw new Error('No releases found on GitHub');
@@ -114,15 +116,15 @@ async function checkForUpdates(manual = false) {
 
     const latestTag = data[0].tag_name; // e.g., "v0.1.6" or "Alpha"
     const releaseName = data[0].name || '';
-    
+
     // Extract version number like 0.1.6 from either name or tag
     const versionMatch = releaseName.match(/(\d+\.\d+\.\d+)/) || latestTag.match(/(\d+\.\d+\.\d+)/);
     const latestVersion = versionMatch ? versionMatch[1] : latestTag.replace('v', '');
 
     if (latestVersion !== currentVersion) {
-      if (mainWindow) mainWindow.webContents.send('update-available', { 
-        version: latestVersion, 
-        tag: latestTag 
+      if (mainWindow) mainWindow.webContents.send('update-available', {
+        version: latestVersion,
+        tag: latestTag
       });
     } else if (manual) {
       if (mainWindow) mainWindow.webContents.send('update-available', 'none');
@@ -152,8 +154,13 @@ function createWindow() {
       color: '#5aef7e', // matches --topbar-bg in style.css exactly
       symbolColor: '#000000'
     },
-    icon: nativeImage.createFromPath(path.join(__dirname, 'images/icon.png'))
+    icon: path.join(__dirname, 'images/icon.png')
   });
+
+  // Force icon update for Windows Taskbar
+  if (process.platform === 'win32') {
+    mainWindow.setIcon(path.join(__dirname, 'images/icon.png'));
+  }
 
   // Decide if we are in dev or prod
   // For simplicity, we just load Vite's default dev server if running "npm run dev"
@@ -193,7 +200,7 @@ const AD_DOMAINS_STRICT = [
 ipcMain.on('apply-settings', async (event, settings) => {
   globalSettings = settings;
   const sess = session.fromPartition('persist:leef-session');
-  
+
   let acceptLang = 'en-US,en';
   if (settings.language === 'fr') acceptLang = 'fr-FR,fr,en;q=0.9';
   if (settings.language === 'es') acceptLang = 'es-ES,es,en;q=0.9';
@@ -216,7 +223,7 @@ ipcMain.on('apply-settings', async (event, settings) => {
   // - Basic mode: Install our own domain-based handler.
   const blockList = settings.tracking === 'strict' ? AD_DOMAINS_STRICT : AD_DOMAINS_STANDARD;
 
-  
+
   if (!adblockerEnabled) {
     // Only set our own handler if Ghostery isn't running
     sess.webRequest.onBeforeRequest(null);
@@ -228,7 +235,7 @@ ipcMain.on('apply-settings', async (event, settings) => {
           if (blockList.some(domain => host.includes(domain))) {
             return callback({ cancel: true });
           }
-        } catch (e) {}
+        } catch (e) { }
       }
       callback({ cancel: false });
     });
@@ -272,7 +279,7 @@ ipcMain.on('apply-settings', async (event, settings) => {
   // Unified Permission Request Handler
   sess.setPermissionRequestHandler((webContents, permission, callback, details) => {
     let origin = '';
-    try { origin = new URL(details.requestingUrl).origin; } catch(e){}
+    try { origin = new URL(details.requestingUrl).origin; } catch (e) { }
 
     if (permission === 'notifications') {
       if (settings.sitePermissions && settings.sitePermissions[origin] && settings.sitePermissions[origin].notifications !== undefined) {
@@ -280,12 +287,12 @@ ipcMain.on('apply-settings', async (event, settings) => {
       }
       return callback(settings.allowNotifications === true);
     }
-    
+
     if (permission === 'media' || permission === 'geolocation') {
       if (settings.sitePermissions && settings.sitePermissions[origin] && settings.sitePermissions[origin][permission] !== undefined) {
         return callback(settings.sitePermissions[origin][permission]);
       }
-      
+
       // Dynamic Prompt
       const reqId = ++permReqId;
       permissionCallbacks[reqId] = callback;
@@ -318,7 +325,7 @@ ipcMain.on('refresh-adblock', async () => {
   adblockerEnabled = false;
   adblockerLoading = false;
   if (blocker) {
-    try { blocker.disableBlockingInSession(session.fromPartition('persist:leef-session')); } catch(e){}
+    try { blocker.disableBlockingInSession(session.fromPartition('persist:leef-session')); } catch (e) { }
     blocker = null;
   }
   if (mainWindow) mainWindow.webContents.send('adblock-status', 'syncing');
@@ -391,13 +398,13 @@ ipcMain.on('show-context-menu', (event, params) => {
   if (params.selectionText) {
     const cleanText = params.selectionText.trim();
     const displaySelection = cleanText.length > 15 ? cleanText.substring(0, 15) + '...' : cleanText;
-    
+
     menu.append(new MenuItem({
       label: `Search Google for "${displaySelection}"`,
       click: () => event.sender.send('context-menu-command', { command: 'search-google', text: cleanText })
     }));
     menu.append(new MenuItem({ type: 'separator' }));
-    
+
     menu.append(new MenuItem({ label: 'Copy', role: 'copy' }));
     menu.append(new MenuItem({
       label: 'Raw Copy (No formatting)',
@@ -493,6 +500,69 @@ ipcMain.on('clear-data', async () => {
   await sess.clearCache();
 });
 
+ipcMain.on('generate-bug-log', (event, data) => {
+  try {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `leef-diagnostics-${timestamp}.txt`;
+    const downloadsPath = app.getPath('downloads');
+    const filePath = path.join(downloadsPath, filename);
+
+    const cpuInfo = os.cpus();
+    const cpuModel = cpuInfo.length > 0 ? cpuInfo[0].model : 'Unknown CPU';
+    const cpuCores = cpuInfo.length;
+
+    const logContent = `--------------------------------------------------
+LEEF BROWSER DIAGNOSTICS LOG
+Generated: ${new Date().toLocaleString()}
+--------------------------------------------------
+
+IMPORTANT SECURITY WARNING:
+Do not share this file with anyone except the official bug report form:
+https://forms.gle/upGc1dvPYaoBw4o96
+or email it directly to: contact.qtech@proton.me
+
+This file contains your browser settings and system configuration.
+It DOES NOT contain your history, passwords, or personal data.
+
+--------------------------------------------------
+APPLICATION INFO
+--------------------------------------------------
+Leef Version: ${app.getVersion()}
+Chrome: ${process.versions.chrome}
+Electron: ${process.versions.electron}
+Node: ${process.versions.node}
+Platform: ${process.platform} (${process.arch})
+
+--------------------------------------------------
+SYSTEM INFO
+--------------------------------------------------
+OS: ${os.type()} ${os.release()}
+Total Memory: ${(os.totalmem() / (1024 * 1024 * 1024)).toFixed(2)} GB
+Free Memory: ${(os.freemem() / (1024 * 1024 * 1024)).toFixed(2)} GB
+CPU: ${cpuModel} (${cpuCores} cores)
+
+--------------------------------------------------
+BROWSER SETTINGS
+--------------------------------------------------
+${JSON.stringify(data.settings, null, 2)}
+
+--------------------------------------------------
+LABS / EXPERIMENTAL FLAGS
+--------------------------------------------------
+${JSON.stringify(data.labs, null, 2)}
+
+--------------------------------------------------
+END OF LOG
+--------------------------------------------------`;
+
+    fs.writeFileSync(filePath, logContent, 'utf8');
+    event.sender.send('bug-log-generated', { success: true, filename });
+  } catch (error) {
+    console.error('Failed to generate bug log:', error);
+    event.sender.send('bug-log-generated', { success: false, error: error.message });
+  }
+});
+
 ipcMain.on('set-default-browser', () => {
   app.setAsDefaultProtocolClient('http');
   app.setAsDefaultProtocolClient('https');
@@ -504,14 +574,14 @@ app.on('web-contents-created', (event, contents) => {
     // - Features present (width/height defined by site)
     // - Specific identity provider domains
     const isPopup = (features && features.length > 0);
-    const isAuth = url.includes('accounts.google.com') || 
-                   url.includes('facebook.com/dialog/oauth') || 
-                   url.includes('github.com/login/oauth') ||
-                   url.includes('auth.services.adobe.com');
+    const isAuth = url.includes('accounts.google.com') ||
+      url.includes('facebook.com/dialog/oauth') ||
+      url.includes('github.com/login/oauth') ||
+      url.includes('auth.services.adobe.com');
 
     if (isPopup || isAuth) {
       console.log('Allowing themed popup for:', url);
-      return { 
+      return {
         action: 'allow',
         overrideBrowserWindowOptions: {
           backgroundColor: '#1c1c1c',
@@ -535,7 +605,7 @@ app.on('web-contents-created', (event, contents) => {
   session.fromPartition('persist:leef-session').on('will-download', (event, item) => {
     const filename = item.getFilename();
     const totalBytes = item.getTotalBytes();
-    
+
     if (globalSettings.askDownload) {
       item.setSaveDialogOptions({
         title: 'Save File',

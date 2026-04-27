@@ -1,9 +1,18 @@
 {
   "name": "private-browser",
-  "version": "0.1.6",
-  "description": "Leef is a fast, private, and modern Electron-based web browser built for everyday use.",
-  "author": "QTech",
+  "version": "0.1.7",
   "private": true,
+  "description": "Leef is a fast, private, and modern Electron-based web browser built for everyday use.",
+  "homepage": "https://github.com/git-QTech/leef#readme",
+  "bugs": {
+    "url": "https://github.com/git-QTech/leef/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/git-QTech/leef.git"
+  },
+  "license": "ISC",
+  "author": "QTech",
   "type": "module",
   "main": "main.js",
   "scripts": {
@@ -13,6 +22,16 @@
     "preview": "vite preview",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win"
+  },
+  "dependencies": {
+    "@ghostery/adblocker-electron": "^2.14.1",
+    "app-builder-bin": "^5.0.0-alpha.12",
+    "cross-fetch": "^4.1.0"
+  },
+  "devDependencies": {
+    "electron": "^41.2.1",
+    "electron-builder": "^26.8.1",
+    "vite": "^8.0.4"
   },
   "build": {
     "appId": "com.quinn.leefbrowser",
@@ -48,15 +67,5 @@
       "perMachine": false
     },
     "asar": true
-  },
-  "devDependencies": {
-    "electron": "^41.2.1",
-    "electron-builder": "^26.8.1",
-    "vite": "^8.0.4"
-  },
-  "dependencies": {
-    "@ghostery/adblocker-electron": "^2.14.1",
-    "app-builder-bin": "^5.0.0-alpha.12",
-    "cross-fetch": "^4.1.0"
   }
 }

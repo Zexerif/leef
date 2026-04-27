@@ -18,7 +18,7 @@
     <div class="nav-row">
       <div class="brand">
         <img class="brand-icon" src="./images/icon-mark.png">
-        Leef
+        <span>Leef</span>
       </div>
 
       <div class="nav-buttons">
@@ -167,9 +167,9 @@
         </div>
 
         <div class="footer-logo">
-          <div style="display: flex; align-items: center; gap: 6px; margin-right: auto;">
+          <div style="display: flex; align-items: center; gap: 0; margin-right: auto;">
             <img class="brand-icon" src="./images/icon-mark.png" style="height: 36px;">
-            <span style="font-size: 1.2rem;">Leef</span>
+            <span>Leef</span>
           </div>
           <button id="btn-whats-new" class="nav-btn">What's New</button>
           <button id="btn-credits" class="nav-btn">Credits</button>
@@ -186,15 +186,35 @@
         <p class="changelog-subtitle">Discover the latest updates and improvements</p>
 
         <div class="update-card">
+          <div class="update-date">April 27, 2026</div>
+          <h2>Diagnostics & Onboarding (v0.1.7)</h2>
+          <ul>
+            <li><strong>First-Time Setup Wizard:</strong> A brand-new onboarding experience for fresh installs. Configure privacy, ad-blocking, and search preferences with a modern, animated walkthrough.</li>
+            <li><strong>Bug Report Diagnostics:</strong> Generate a local diagnostics log from the Advanced settings. Includes system specs and configurations to help with bug reports (100% local, no telemetry).</li>
+            <li><strong>Refined Ad-Blocking:</strong> Replaced the old toggle with a clear 3-tier selector (None, Basic, Comprehensive) to match the main settings and provide more granular control.</li>
+            <li><strong>Home Tab Optimization:</strong> Fixed issues with home page tiles and layout alignment for a cleaner startup experience.</li>
+            <li><strong>Branding & Logo Polish:</strong> Enlarged and re-centered logos across the onboarding and settings pages for a more premium, high-impact feel.</li>
+            <li><strong>Transparency Note:</strong> Added a permanent notice emphasizing that Leef is non-profit, donation-free, and collects zero telemetry data.</li>
+          </ul>
+        </div>
+
+        <div class="update-card">
           <div class="update-date">April 26, 2026</div>
           <h2>Performance & Tab Mastery (v0.1.6)</h2>
           <ul>
-            <li><strong>Site Permissions Manager:</strong> Fully implemented dynamic permission prompts for Camera, Microphone, and Location. You can now manage, revoke, or manually add site permissions directly from the Settings menu.</li>
-            <li><strong>Robust AI Blocking:</strong> Overhauled search interception to ensure the "Block Google AI Overview" setting works even when using Google's internal search bars.</li>
-            <li><strong>Advanced Tab Management:</strong> Right-click tabs to Pin, Duplicate, Mute, or close others. Pinned tabs now feature a 📌 icon and improved visibility when inactive.</li>
-            <li><strong>Smart Address Bar:</strong> Instant results from your <strong>Bookmarks</strong> are now shown as you type. You can also enable a new setting to show live web autocomplete suggestions.</li>
-            <li><strong>Live Download Progress:</strong> Added a circular progress ring to the toolbar's download icon that tracks all active downloads in real-time.</li>
-            <li><strong>UI Color Audit:</strong> Refined the "Leef Green" palette and fixed accent colors to ensure a consistent, premium aesthetic across all form elements.</li>
+            <li><strong>Site Permissions Manager:</strong> Fully implemented dynamic permission prompts for Camera,
+              Microphone, and Location. You can now manage, revoke, or manually add site permissions directly from the
+              Settings menu.</li>
+            <li><strong>Robust AI Blocking:</strong> Overhauled search interception to ensure the "Block Google AI
+              Overview" setting works even when using Google's internal search bars.</li>
+            <li><strong>Advanced Tab Management:</strong> Right-click tabs to Pin, Duplicate, Mute, or close others.
+              Pinned tabs now feature a 📌 icon and improved visibility when inactive.</li>
+            <li><strong>Smart Address Bar:</strong> Instant results from your <strong>Bookmarks</strong> are now shown
+              as you type. You can also enable a new setting to show live web autocomplete suggestions.</li>
+            <li><strong>Live Download Progress:</strong> Added a circular progress ring to the toolbar's download icon
+              that tracks all active downloads in real-time.</li>
+            <li><strong>UI Color Audit:</strong> Refined the "Leef Green" palette and fixed accent colors to ensure a
+              consistent, premium aesthetic across all form elements.</li>
           </ul>
         </div>
 
@@ -208,7 +228,8 @@
               startup. Includes a clear privacy toggle to switch to manual-only checks.</li>
             <li><strong>Network Transparency:</strong> Added live status badges (<code>[OFFLINE]</code>,
               <code>[SYNCING]</code>, <code>[SECURED]</code>) to show exactly when the browser is communicating with
-              external servers.</li>
+              external servers.
+            </li>
             <li><strong>Smart Engine Caching:</strong> Advanced ad-block definitions are now cached locally after the
               first download, ensuring future launches are instant and data-free.</li>
             <li><strong>Interactive Update Toasts:</strong> If a new version is found, a notification appears that lets
@@ -348,7 +369,7 @@
         <div class="credits-header">
           <img class="credits-logo" src="./images/icon-mark.png">
           <h1>Leef Browser Credits</h1>
-          <p class="credits-subtitle">Version 0.1.6 — Open Source Privacy</p>
+          <p class="credits-subtitle">Version 0.1.7 — Open Source Privacy</p>
         </div>
 
         <div class="credits-section">
@@ -384,6 +405,13 @@
             <h3>Privacy Policy</h3>
             <p>We believe your data belongs to you. Leef Browser does not collect analytics, telemetry, or browsing
               history. Everything stays local on your machine.</p>
+          </div>
+        </div>
+
+        <div class="credits-section">
+          <h2>Transparency & Funding</h2>
+          <div class="credits-card" style="border-left: 4px solid var(--primary-color); background: rgba(23, 179, 64, 0.05);">
+            <p><strong>Leef is a labor of love.</strong> We do not collect telemetry, we do not sell your data, and we do not make any money. We also do not accept donations at this time. Enjoy using Leef exactly as it was intended: fast, private, and free.</p>
           </div>
         </div>
 
@@ -520,7 +548,8 @@
           <div class="setting-group">
             <h3>Clear browsing data</h3>
             <p>Clear history, cookies, cache, and more</p>
-            <button class="settings-btn btn-danger" id="btn-clear-data">Clear Data Now</button>
+            <button class="settings-btn btn-danger" id="btn-clear-data" style="margin-bottom: 8px;">Clear Data Now</button>
+            <button class="settings-btn" id="btn-redo-setup" style="background: rgba(0,0,0,0.05); color: #333;">Redo First-Time Setup</button>
           </div>
           <div class="setting-group">
             <h3>Tracking Protection</h3>
@@ -652,6 +681,14 @@
             <h3>Developer Tools</h3>
             <button class="settings-btn" id="btn-open-flags-advanced" style="width: auto;">Leef Labs</button>
           </div>
+          <div class="setting-group">
+            <h3>Bug Report Diagnostics</h3>
+            <p style="margin-bottom: 8px;">Generate a local log file with system info to help us debug issues.</p>
+            <button class="settings-btn" id="btn-generate-log" style="background: rgba(0,0,0,0.05); color: #333; margin-bottom: 8px;">Generate Diagnostics Log</button>
+            <div style="font-size: 0.8rem; color: #666; line-height: 1.4; background: rgba(0,0,0,0.02); padding: 8px; border-radius: 6px;">
+              <strong>Privacy Note:</strong> This file is saved locally to your Downloads folder. We do not collect telemetry. Unless you manually upload this file to the <a href="https://forms.gle/upGc1dvPYaoBw4o96" target="_blank" style="color: var(--primary-color); text-decoration: none;">bug report form</a> or email it to <strong>contact.qtech@proton.me</strong>, no data leaves your device.
+            </div>
+          </div>
         </div>
 
       </div>
@@ -688,6 +725,20 @@
       <input type="text" id="hub-add-name" placeholder="e.g. GitHub" autocomplete="off" spellcheck="false" />
       <label for="hub-add-url">Site URL</label>
       <input type="text" id="hub-add-url" placeholder="e.g. https://github.com" autocomplete="off" spellcheck="false" />
+      <label>Tile Color</label>
+      <div class="hub-add-colors" id="hub-add-colors">
+        <div class="color-opt active" data-color="#ffd699" style="background: #ffd699;" title="Orange"></div>
+        <div class="color-opt" data-color="#ff8597" style="background: #ff8597;" title="Pink"></div>
+        <div class="color-opt" data-color="#ff8585" style="background: #4184ff;" title="Red"></div>
+        <div class="color-opt" data-color="#76acff" style="background: #ffb84e;" title="Blue"></div>
+        <div class="color-opt" data-color="#8c82ff" style="background: #8c82ff;" title="Purple"></div>
+        <div class="color-opt" data-color="#92ff78" style="background: #92ff78;" title="Leef Green"></div>
+        <div class="color-opt" data-color="#00d1c1" style="background: #00d1c1;" title="Teal"></div>
+        <div class="color-opt" data-color="#ffffff" style="background: #ffffff; border: 1.5px solid rgba(0,0,0,0.1);"
+          title="White"></div>
+        <div class="color-opt" data-color="#333333" style="background: #333333;" title="Black"></div>
+        <div class="color-opt" data-color="#aaaaaa" style="background: #aaaaaa;" title="Gray"></div>
+      </div>
       <div class="hub-modal-actions">
         <button id="hub-add-cancel" class="hub-modal-btn hub-modal-cancel">Cancel</button>
         <button id="hub-add-confirm" class="hub-modal-btn hub-modal-confirm">Add Tile</button>
@@ -696,13 +747,15 @@
   </div>
 
   <!-- Dynamic Permission Prompt Modal -->
-  <div id="permission-prompt-overlay" class="hub-modal-overlay" style="display:none; align-items: flex-start; padding-top: 60px;">
+  <div id="permission-prompt-overlay" class="hub-modal-overlay"
+    style="display:none; align-items: flex-start; padding-top: 60px;">
     <div class="hub-modal" style="animation: slideDown 0.3s ease-out;">
       <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
         <span id="permission-prompt-icon" style="font-size: 1.5rem;">🔒</span>
         <h3 style="margin: 0;" id="permission-prompt-title">Permission Request</h3>
       </div>
-      <p id="permission-prompt-msg" style="font-size: 0.95rem; color: #444; margin-bottom: 20px;">The site <strong id="permission-prompt-origin"></strong> wants to use your <strong id="permission-prompt-type"></strong>.</p>
+      <p id="permission-prompt-msg" style="font-size: 0.95rem; color: #444; margin-bottom: 20px;">The site <strong
+          id="permission-prompt-origin"></strong> wants to use your <strong id="permission-prompt-type"></strong>.</p>
       <div class="hub-modal-actions">
         <button id="permission-prompt-deny" class="hub-modal-btn hub-modal-cancel" style="flex: 1;">Deny</button>
         <button id="permission-prompt-allow" class="hub-modal-btn hub-modal-confirm" style="flex: 1;">Allow</button>
@@ -714,14 +767,17 @@
   <div id="site-permissions-modal" class="hub-modal-overlay" style="display:none;">
     <div class="hub-modal" style="max-width: 500px; width: 90%;">
       <h3>Site Permissions</h3>
-      <p style="font-size: 0.85rem; color: #666; margin-bottom: 15px;">Manage websites that have requested access to your camera, microphone, or location.</p>
-      
-      <div id="site-permissions-list" style="max-height: 250px; overflow-y: auto; margin-bottom: 15px; border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; padding: 5px;">
+      <p style="font-size: 0.85rem; color: #666; margin-bottom: 15px;">Manage websites that have requested access to
+        your camera, microphone, or location.</p>
+
+      <div id="site-permissions-list"
+        style="max-height: 250px; overflow-y: auto; margin-bottom: 15px; border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; padding: 5px;">
         <!-- Permissions injected here -->
       </div>
-      
+
       <div class="hub-modal-actions" style="justify-content: space-between;">
-        <button id="btn-add-site-permission" class="settings-btn" style="background: var(--topbar-bg); color: #111; font-size: 0.85rem; padding: 6px 12px;">+ Add Site</button>
+        <button id="btn-add-site-permission" class="settings-btn"
+          style="background: var(--topbar-bg); color: #111; font-size: 0.85rem; padding: 6px 12px;">+ Add Site</button>
         <button id="site-permissions-close" class="hub-modal-btn hub-modal-cancel">Done</button>
       </div>
     </div>
@@ -758,6 +814,64 @@
       <p>Note: Enabling experimental features may affect browser stability.</p>
     </div>
   </div>
+  </div>
+
+  <!-- First-Time Startup Onboarding -->
+  <div id="onboarding-overlay" class="onboarding-overlay" style="display: none;">
+    <div class="onboarding-content">
+      <div class="onboarding-header-section">
+        <img class="brand-icon" src="./images/icon-mark.png">
+        <h1>Welcome to Leef</h1>
+        <p>Set up your browsing experience before we get started.</p>
+      </div>
+      
+      <div class="onboarding-options">
+        <div class="onboarding-card" style="animation-delay: 0.1s;">
+          <div style="flex: 1; padding-right: 16px;">
+            <h3>AI Overview Blocker</h3>
+            <p>Automatically remove AI-generated summaries from Google search results.</p>
+          </div>
+          <label class="switch" style="flex-shrink: 0;"><input type="checkbox" id="onboard-ai" checked><span class="slider"></span></label>
+        </div>
+
+        <div class="onboarding-card" style="animation-delay: 0.2s; flex-direction: column; align-items: flex-start;">
+          <div style="margin-bottom: 8px;">
+            <h3>Ad & Tracker Blocking</h3>
+            <p>Choose your level of protection. You can adjust this later in settings.</p>
+          </div>
+          <div class="radio-group" style="width: 100%; display: flex; flex-direction: column; gap: 8px;">
+            <label class="radio-row" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="radio" name="onboard-adblock-tier" value="none" checked>
+              <span style="font-size: 0.9rem; color: rgba(0,0,0,0.8);"><strong>None</strong> — No active blocking enabled.</span>
+            </label>
+            <label class="radio-row" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="radio" name="onboard-adblock-tier" value="basic">
+              <span style="font-size: 0.9rem; color: rgba(0,0,0,0.8);"><strong>Basic</strong> — Lightweight domain filtering (100% Offline).</span>
+            </label>
+            <label class="radio-row" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="radio" name="onboard-adblock-tier" value="comprehensive">
+              <span style="font-size: 0.9rem; color: rgba(0,0,0,0.8);"><strong>Comprehensive</strong> — Full engine protection. <span style="color: var(--primary-color); font-weight: 600;">(External Call)</span></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="onboarding-card" style="animation-delay: 0.3s;">
+          <div style="flex: 1; padding-right: 16px;">
+            <h3>Live Search Autocomplete</h3>
+            <p>Send keystrokes to a search engine for live address bar suggestions.</p>
+          </div>
+          <label class="switch" style="flex-shrink: 0;"><input type="checkbox" id="onboard-autocomplete"><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="onboarding-footer" style="animation-delay: 0.4s;">
+        <button id="btn-onboarding-finish" class="nav-btn btn-primary">Start Browsing</button>
+        <div class="onboarding-subtext">
+          <strong>Transparency Note:</strong> Leef is built for you. We don't collect telemetry, make money, or take donations.<br>
+          <span style="opacity: 0.7; font-size: 0.8rem;">You can change these options at any time in Settings.</span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="./renderer.js"></script>
