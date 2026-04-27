@@ -811,10 +811,19 @@
     <div class="flags-footer">
       <button class="settings-btn" id="btn-flags-relaunch"
         style="display: none; background: #ff0000; color: #fff;">Apply & Restart</button>
-      <p>Note: Enabling experimental features may affect browser stability.</p>
+              <p>Note: Enabling experimental features may affect browser stability.</p>
     </div>
   </div>
   </div>
+
+  <script>
+    if (!localStorage.getItem('leef_onboarding_done')) {
+      localStorage.removeItem('leef_settings');
+      localStorage.removeItem('leef_labs_flags');
+      const overlay = document.getElementById('onboarding-overlay');
+      if (overlay) overlay.style.display = 'flex';
+    }
+  </script>
 
   <!-- First-Time Startup Onboarding -->
   <div id="onboarding-overlay" class="onboarding-overlay" style="display: none;">
@@ -831,18 +840,18 @@
             <h3>AI Overview Blocker</h3>
             <p>Automatically remove AI-generated summaries from Google search results.</p>
           </div>
-          <label class="switch" style="flex-shrink: 0;"><input type="checkbox" id="onboard-ai" checked><span class="slider"></span></label>
+          <label class="switch" style="flex-shrink: 0;"><input type="checkbox" id="onboard-ai"><span class="slider"></span></label>
         </div>
 
-        <div class="onboarding-card" style="animation-delay: 0.2s; flex-direction: column; align-items: flex-start;">
+        <div class="onboarding-card" style="animation-delay: 0.2s; flex-direction: column; align-items: flex-start; gap: 12px; height: auto; padding: 16px;">
           <div style="margin-bottom: 8px;">
             <h3>Ad & Tracker Blocking</h3>
             <p>Choose your level of protection. You can adjust this later in settings.</p>
           </div>
           <div class="radio-group" style="width: 100%; display: flex; flex-direction: column; gap: 8px;">
             <label class="radio-row" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-              <input type="radio" name="onboard-adblock-tier" value="none" checked>
-              <span style="font-size: 0.9rem; color: rgba(0,0,0,0.8);"><strong>None</strong> — No active blocking enabled.</span>
+              <input type="radio" name="onboard-adblock-tier" value="none">
+              <span style="font-size: 0.9rem; color: rgba(0,0,0,0.8);"><strong>None</strong> — No active blocking.</span>
             </label>
             <label class="radio-row" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
               <input type="radio" name="onboard-adblock-tier" value="basic">

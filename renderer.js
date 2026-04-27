@@ -2021,6 +2021,10 @@ window.onload = () => {
 
   // First-Time Startup Onboarding
   if (!localStorage.getItem('leef_onboarding_done')) {
+    // FACTORY RESET: Ensure settings are defaults for new users
+    localStorage.removeItem('leef_settings');
+    localStorage.removeItem('leef_labs_flags');
+    
     const overlay = document.getElementById('onboarding-overlay');
     if (overlay) {
       overlay.style.display = 'flex';
