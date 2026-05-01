@@ -41,6 +41,7 @@
       "main.js",
       "renderer.js",
       "index.html",
+      "offline.html",
       "style.css",
       "images/**/*",
       "!**/.vscode/*",

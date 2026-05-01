@@ -1199,7 +1199,12 @@ class TabManager {
       
       // Only show offline page for main frame failures that aren't about-blank
       if (e.isMainFrame && e.validatedURL !== 'about:blank') {
-        const offlinePath = `file://${window.require('path').join(__dirname, 'offline.html')}?url=${encodeURIComponent(e.validatedURL)}&code=${e.errorCode}&desc=${encodeURIComponent(e.errorDescription)}`;
+        // More robust pathing for production builds:
+        // Use the current window location to derive the base path
+        const currentPath = window.location.pathname;
+        const baseDir = currentPath.substring(0, currentPath.lastIndexOf('/'));
+        const offlinePath = `file://${baseDir}/offline.html?url=${encodeURIComponent(e.validatedURL)}&code=${e.errorCode}&desc=${encodeURIComponent(e.errorDescription)}`;
+        
         tab.webviewEl.loadURL(offlinePath);
       }
     });
