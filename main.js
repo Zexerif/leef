@@ -1,10 +1,16 @@
-import { app, BrowserWindow, session, ipcMain, Menu, MenuItem, clipboard, nativeImage } from 'electron';
+import { app, BrowserWindow, session, ipcMain, Menu, MenuItem, clipboard, nativeImage, shell } from 'electron';
+
+import updater from 'electron-updater';
+const { autoUpdater } = updater;
+
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { ElectronBlocker } from '@ghostery/adblocker-electron';
 import fetch from 'cross-fetch';
+import { execSync } from 'child_process';
+
 
 // SET IDENTITY AS EARLY AS POSSIBLE (Critical for Windows Taskbar)
 app.name = 'Leef Browser';
@@ -26,6 +32,11 @@ app.commandLine.appendSwitch('disable-features', 'DirectComposition,VideoToolbox
 app.commandLine.appendSwitch('disable-direct-composition');
 app.commandLine.appendSwitch('disable-gpu-driver-bug-workarounds');
 
+const isDev = !app.isPackaged || process.env.NODE_ENV === 'development';
+console.log('Leef Browser: isDev =', isDev, '| app.isPackaged =', app.isPackaged);
+
+
+
 let mainWindow;
 let blocker;
 const permissionCallbacks = {};
@@ -33,6 +44,18 @@ let permReqId = 0;
 let globalSettings = {};
 let adblockerEnabled = false;
 let adblockerLoading = false;
+const activeDownloads = new Map();
+
+
+function safeSend(channel, ...args) {
+  BrowserWindow.getAllWindows().forEach(win => {
+    if (win && !win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
+      win.webContents.send(channel, ...args);
+    }
+  });
+}
+
+
 
 async function initAdBlocker(enabled = false) {
   const sess = session.fromPartition('persist:leef-session');
@@ -55,7 +78,7 @@ async function initAdBlocker(enabled = false) {
       blocker = await ElectronBlocker.deserialize(fs.readFileSync(cachePath));
       console.log('AdBlocker loaded from cache.');
     } else {
-      if (mainWindow) mainWindow.webContents.send('adblock-status', 'syncing');
+      safeSend('adblock-status', 'syncing');
       const fetchWithTimeout = (url, timeout = 15000) => {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeout);
@@ -77,66 +100,84 @@ async function initAdBlocker(enabled = false) {
       console.log('AdBlocker: Engine compiled successfully with', lists.length, 'lists.');
 
       fs.writeFileSync(cachePath, blocker.serialize());
-      if (mainWindow) mainWindow.webContents.send('adblock-status', 'updated');
+      safeSend('adblock-status', 'updated');
     }
 
     // Enable cosmetic filtering and IPC handlers (Once)
     blocker.enableBlockingInSession(sess);
     blocker.on('request-blocked', (request) => {
-      if (mainWindow) mainWindow.webContents.send('adblock-item-blocked', { tabId: request.tabId, url: request.url });
+      safeSend('adblock-item-blocked', { tabId: request.tabId, url: request.url });
     });
     adblockerEnabled = true;
   } catch (err) {
     console.error('AdBlocker error:', err);
-    if (mainWindow) mainWindow.webContents.send('adblock-status', 'error');
+    safeSend('adblock-status', 'error');
   } finally {
     adblockerLoading = false;
   }
 }
 
-async function checkForUpdates(manual = false) {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
-    const currentVersion = pkg.version;
+// --- AUTO UPDATER CONFIGURATION ---
+if (!isDev) {
+  autoUpdater.autoDownload = false; // Don't download automatically
+  autoUpdater.autoInstallOnAppQuit = true;
 
-    // Add an artificial delay for manual checks so the user actually sees the UI update
-    if (manual) {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-    }
+  autoUpdater.on('checking-for-update', () => {
+    console.log('Checking for update...');
+  });
 
-    const response = await fetch('https://api.github.com/repos/git-QTech/leef/releases', {
-      headers: { 'User-Agent': 'Leef-Browser-Update-Checker' }
+  autoUpdater.on('update-available', (info) => {
+    console.log('Update available:', info.version);
+    safeSend('update-available', {
+      version: info.version,
+      tag: info.version,
+      releaseNotes: info.releaseNotes
     });
+  });
 
-    if (!response.ok) {
-      throw new Error(`GitHub API returned status ${response.status}`);
+  autoUpdater.on('update-not-available', (info) => {
+    console.log('Update not available.');
+    safeSend('update-available', 'none');
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('Auto-updater error:', err);
+    safeSend('update-available', 'error');
+  });
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    safeSend('update-download-progress', progressObj);
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('Update downloaded; will install on quit.');
+    safeSend('update-downloaded', info);
+  });
+}
+
+async function checkForUpdates(manual = false) {
+  if (isDev) {
+    console.log('Leef Browser: Bypassing real update check (Dev Mode).');
+    if (manual) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      safeSend('update-available', 'none');
     }
+    return;
+  }
 
-    const data = await response.json();
-    if (!data || data.length === 0) {
-      throw new Error('No releases found on GitHub');
-    }
-
-    const latestTag = data[0].tag_name; // e.g., "v0.1.6" or "Alpha"
-    const releaseName = data[0].name || '';
-
-    // Extract version number like 0.1.6 from either name or tag
-    const versionMatch = releaseName.match(/(\d+\.\d+\.\d+)/) || latestTag.match(/(\d+\.\d+\.\d+)/);
-    const latestVersion = versionMatch ? versionMatch[1] : latestTag.replace('v', '');
-
-    if (latestVersion !== currentVersion) {
-      if (mainWindow) mainWindow.webContents.send('update-available', {
-        version: latestVersion,
-        tag: latestTag
-      });
-    } else if (manual) {
-      if (mainWindow) mainWindow.webContents.send('update-available', 'none');
+  try {
+    if (manual) {
+      await autoUpdater.checkForUpdates();
+    } else {
+      await autoUpdater.checkForUpdatesAndNotify();
     }
   } catch (err) {
-    console.error('Update check failed:', err.message || err);
-    if (manual && mainWindow) mainWindow.webContents.send('update-available', 'error');
+    console.error('Update check failed:', err);
+    if (manual) safeSend('update-available', 'error');
   }
 }
+
+
 
 ipcMain.handle('fetch-autocomplete', async (event, query) => {
   try {
@@ -153,14 +194,96 @@ ipcMain.handle('fetch-autocomplete', async (event, query) => {
   }
 });
 
+let isRecoveryMode = false;
+let startupError = 'None';
+
+async function generateDiagnosticLog(error = 'None') {
+  const userData = app.getPath('userData');
+  const logPath = path.join(userData, 'leef-diagnostic.txt');
+  
+  const scrub = (str) => {
+    if (!str) return '';
+    const home = os.homedir().replace(/\\/g, '\\\\');
+    return str.replace(new RegExp(home, 'g'), '<User>');
+  };
+
+  let gpuInfo = {};
+  try { gpuInfo = await app.getGPUInfo('basic'); } catch (e) { gpuInfo = { error: 'Failed to fetch' }; }
+
+  const fileChecks = {
+    'index.html': fs.existsSync(path.join(__dirname, 'index.html')),
+    'renderer.js': fs.existsSync(path.join(__dirname, 'renderer.js')),
+    'style.css': fs.existsSync(path.join(__dirname, 'style.css')),
+    'package.json': fs.existsSync(path.join(__dirname, 'package.json')),
+    'Recovery UI': fs.existsSync(path.join(__dirname, 'recovery.html'))
+  };
+
+  const logContent = [
+    `Leef Browser Diagnostic Log - ${new Date().toISOString()}`,
+    `----------------------------------------------------`,
+    `PRIVACY DISCLAIMER: This log does NOT contain any PII`,
+    `(Personally Identifiable Information). IP addresses,`,
+    `user credentials, and browsing history are NOT stored.`,
+    `All local system paths have been anonymized.`,
+    `----------------------------------------------------`,
+    `App Version: ${app.isPackaged ? app.getVersion() : '0.3.0 (Beta)'}`,
+
+
+    `Electron Version: ${process.versions.electron}`,
+    `Chrome Version: ${process.versions.chrome}`,
+    `Node Version: ${process.versions.node}`,
+    `Platform: ${process.platform} (${os.release()})`,
+    `Arch: ${process.arch}`,
+    `Process Memory: ${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`,
+    `----------------------------------------------------`,
+    `Integrity Check:`,
+    Object.entries(fileChecks).map(([f, exists]) => ` - ${f}: ${exists ? 'OK' : 'MISSING'}`).join('\n'),
+    `----------------------------------------------------`,
+    `GPU Information:`,
+    JSON.stringify(gpuInfo, null, 2),
+    `----------------------------------------------------`,
+    `Recovery Triggered: ${isRecoveryMode ? 'Yes' : 'No'}`,
+    `Last Error Stack:`,
+    scrub(error),
+    `----------------------------------------------------`,
+    `Arguments: ${scrub(process.argv.join(' '))}`
+  ].join('\n');
+
+  fs.writeFileSync(logPath, logContent);
+}
+
+
+// Windows-specific Shift detection at startup
+
+try {
+  if (process.platform === 'win32') {
+    const output = execSync('powershell -Command "[Reflection.Assembly]::LoadWithPartialName(\'System.Windows.Forms\') | Out-Null; [Windows.Forms.Control]::ModifierKeys"', { encoding: 'utf8' }).trim();
+    if (output.includes('Shift')) {
+      isRecoveryMode = true;
+      console.log('Recovery Mode Triggered (Shift Held)');
+    }
+  }
+} catch (e) {
+
+  console.error('Failed to check modifier keys:', e);
+}
+
 function createWindow() {
+
   // Use pure in-memory partition for privacy
   const sess = session.fromPartition('persist:leef-session');
 
+  Menu.setApplicationMenu(null);
+
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: isRecoveryMode ? 900 : 1200,
+    height: isRecoveryMode ? 550 : 800,
+    minWidth: 800,
+    minHeight: 500,
+    resizable: !isRecoveryMode,
+    center: true,
     webPreferences: {
+
       nodeIntegration: true,
       contextIsolation: false,
       webviewTag: true,
@@ -175,6 +298,14 @@ function createWindow() {
     icon: path.join(__dirname, 'images/icon.png')
   });
 
+  // Explicitly force size and centering to override any OS-level window persistence
+  if (isRecoveryMode) {
+    mainWindow.setSize(900, 550);
+  } else {
+    mainWindow.setSize(1200, 800);
+  }
+  mainWindow.center();
+
   // Force icon update for Windows Taskbar
   if (process.platform === 'win32') {
     mainWindow.setIcon(path.join(__dirname, 'images/icon.png'));
@@ -183,7 +314,12 @@ function createWindow() {
   // Decide if we are in dev or prod
   // For simplicity, we just load Vite's default dev server if running "npm run dev"
   // but if we are just running electron . we should load index.html
-  mainWindow.loadFile('index.html');
+  if (isRecoveryMode) {
+    mainWindow.loadFile('recovery.html');
+  } else {
+    mainWindow.loadFile('index.html');
+  }
+
   mainWindow.webContents.setMaxListeners(30);
 
   // Handle fullscreen requests from webviews (e.g. YouTube fullscreen button)
@@ -200,7 +336,7 @@ function createWindow() {
   // Global Testing Shortcut: Ctrl+Shift+O (v0.2.1)
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.control && input.shift && input.key.toLowerCase() === 'o' && input.type === 'keyDown') {
-      mainWindow.webContents.send('trigger-offline-game');
+      safeSend('trigger-offline-game');
       event.preventDefault();
     }
   });
@@ -224,7 +360,9 @@ const AD_DOMAINS_STRICT = [
 ];
 
 ipcMain.on('apply-settings', async (event, settings) => {
+  if (isRecoveryMode) return;
   globalSettings = settings;
+
   const sess = session.fromPartition('persist:leef-session');
 
   let acceptLang = 'en-US,en';
@@ -261,6 +399,7 @@ ipcMain.on('apply-settings', async (event, settings) => {
           if (blockList.some(domain => host.includes(domain))) {
             return callback({ cancel: true });
           }
+
         } catch (e) { }
       }
       callback({ cancel: false });
@@ -292,7 +431,7 @@ ipcMain.on('apply-settings', async (event, settings) => {
     // the webContents will-navigate event on the webview in renderer instead.
     // Signal renderer to apply these via IPC
     if (mainWindow) {
-      mainWindow.webContents.send('apply-url-rules', {
+      safeSend('apply-url-rules', {
         httpsOnly: settings.httpsOnly,
         blockAIOverview: settings.blockAIOverview,
         forceSafeOff: settings.labs?.force_safe_off
@@ -323,7 +462,7 @@ ipcMain.on('apply-settings', async (event, settings) => {
       const reqId = ++permReqId;
       permissionCallbacks[reqId] = callback;
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('permission-request', {
+        safeSend('permission-request', {
           id: reqId,
           permission,
           origin
@@ -354,13 +493,21 @@ ipcMain.on('refresh-adblock', async () => {
     try { blocker.disableBlockingInSession(session.fromPartition('persist:leef-session')); } catch (e) { }
     blocker = null;
   }
-  if (mainWindow) mainWindow.webContents.send('adblock-status', 'syncing');
+  safeSend('adblock-status', 'syncing');
   await initAdBlocker(true);
-  if (mainWindow) mainWindow.webContents.send('adblock-status', 'updated');
+  safeSend('adblock-status', 'updated');
 });
 
 ipcMain.on('manual-update-check', () => {
   checkForUpdates(true);
+});
+
+ipcMain.on('restart-to-update', () => {
+  autoUpdater.quitAndInstall();
+});
+
+ipcMain.on('start-download', () => {
+  autoUpdater.downloadUpdate();
 });
 
 ipcMain.on('permission-response', (event, data) => {
@@ -370,25 +517,95 @@ ipcMain.on('permission-response', (event, data) => {
   }
 });
 
+ipcMain.on('recovery-action', async (event, action) => {
+  if (!mainWindow) return;
+
+  switch (action) {
+    case 'reset-config':
+      // Clear Local Storage ( хирургически)
+      const sess = session.fromPartition('persist:leef-session');
+      await sess.clearStorageData({ storages: ['localstorage'] });
+      app.relaunch();
+      app.exit();
+      break;
+    
+    case 'rebuild-appdata':
+      // Nuclear option
+      const fullSess = session.fromPartition('persist:leef-session');
+      await fullSess.clearStorageData();
+      await fullSess.clearCache();
+      app.relaunch();
+      app.exit();
+      break;
+
+    case 'reset-window':
+      // Browser window defaults to 1200x800 on next relaunch. 
+      // For now, just re-center the recovery menu if it got moved.
+      mainWindow.center();
+      break;
+
+    case 'open-appdata':
+      shell.openPath(app.getPath('userData'));
+      break;
+
+    case 'save-diagnostic-log':
+      await generateDiagnosticLog(startupError);
+      break;
+
+    case 'show-diagnostic-log':
+      const logFile = path.join(app.getPath('userData'), 'leef-diagnostic.txt');
+      if (fs.existsSync(logFile)) {
+        shell.showItemInFolder(logFile);
+      }
+      break;
+
+    case 'open-github':
+
+      const githubUrl = 'https://github.com/git-QTech/leef/issues';
+      if (process.platform === 'win32') {
+        try {
+          // Force open in Edge to avoid looping back to a broken Leef
+          execSync(`powershell -Command "Start-Process 'msedge.exe' -ArgumentList '${githubUrl}'"`);
+        } catch (e) {
+          shell.openExternal(githubUrl);
+        }
+      } else {
+        shell.openExternal(githubUrl);
+      }
+      break;
+
+    case 'continue':
+
+      app.relaunch();
+      app.exit();
+      break;
+
+  }
+});
+
 ipcMain.on('show-context-menu', (event, params) => {
+
   const menu = new Menu();
 
   // Navigation Group
-  menu.append(new MenuItem({
-    label: 'Back',
-    enabled: params.editFlags.canGoBack || params.canGoBack,
-    click: () => event.sender.send('context-menu-command', { command: 'go-back' })
-  }));
-  menu.append(new MenuItem({
-    label: 'Forward',
-    enabled: params.editFlags.canGoForward || params.canGoForward,
-    click: () => event.sender.send('context-menu-command', { command: 'go-forward' })
-  }));
-  menu.append(new MenuItem({
-    label: 'Reload',
-    click: () => event.sender.send('context-menu-command', { command: 'reload' })
-  }));
-  menu.append(new MenuItem({ type: 'separator' }));
+  if (!params.isBrowserUI) {
+    menu.append(new MenuItem({
+      label: 'Back',
+      enabled: params.editFlags.canGoBack || params.canGoBack,
+      click: () => event.sender.send('context-menu-command', { command: 'go-back' })
+    }));
+    menu.append(new MenuItem({
+      label: 'Forward',
+      enabled: params.editFlags.canGoForward || params.canGoForward,
+      click: () => event.sender.send('context-menu-command', { command: 'go-forward' })
+    }));
+    menu.append(new MenuItem({
+      label: 'Reload',
+      click: () => event.sender.send('context-menu-command', { command: 'reload' })
+    }));
+    menu.append(new MenuItem({ type: 'separator' }));
+  }
+
 
   // Link actions
   if (params.linkURL) {
@@ -450,7 +667,7 @@ ipcMain.on('show-context-menu', (event, params) => {
   }
 
   // Page Global Actions
-  if (!params.selectionText && !params.linkURL && !params.mediaType) {
+  if (!params.selectionText && !params.linkURL && !params.mediaType && !params.isBrowserUI) {
     menu.append(new MenuItem({
       label: 'Save Page As...',
       click: () => event.sender.send('context-menu-command', { command: 'save-page' })
@@ -465,6 +682,7 @@ ipcMain.on('show-context-menu', (event, params) => {
       click: () => event.sender.send('context-menu-command', { command: 'view-source' })
     }));
   }
+
 
   menu.append(new MenuItem({
     label: 'Inspect Element',
@@ -517,8 +735,30 @@ ipcMain.on('show-tab-context-menu', (event, data) => {
 });
 
 ipcMain.on('show-item-in-folder', (event, path) => {
-  if (path) require('electron').shell.showItemInFolder(path);
+  if (path) shell.showItemInFolder(path);
 });
+
+ipcMain.on('pause-download', (event, id) => {
+  const item = activeDownloads.get(id);
+  if (item && !item.isPaused()) item.pause();
+});
+
+ipcMain.on('resume-download', (event, id) => {
+  const item = activeDownloads.get(id);
+  if (item && item.canResume()) item.resume();
+});
+
+ipcMain.on('cancel-download', (event, id) => {
+  const item = activeDownloads.get(id);
+  if (item) item.cancel();
+});
+
+ipcMain.on('retry-download', (event, url) => {
+  if (mainWindow && !mainWindow.isDestroyed() && url) {
+    mainWindow.webContents.downloadURL(url);
+  }
+});
+
 
 ipcMain.on('clear-data', async () => {
   const sess = session.fromPartition('persist:leef-session');
@@ -621,13 +861,34 @@ ipcMain.on('capture-page', async (event, data) => {
     const filename = `Leef_Screenshot_${timestamp}.png`;
     const filePath = path.join(app.getPath('downloads'), filename);
     
+    const dlId = 'screenshot-' + Date.now();
+    const size = buffer.length;
+
+    safeSend('download-status', {
+      id: dlId,
+      name: filename,
+      url: 'leef://screenshot',
+      status: 'started',
+      total: size
+    });
+
     fs.writeFileSync(filePath, buffer);
+
+    safeSend('download-status', {
+      id: dlId,
+      status: 'completed',
+      path: filePath,
+      received: size,
+      total: size
+    });
+
     event.sender.send('screenshot-captured', { success: true, filePath, filename });
   } catch (error) {
     console.error('Failed to capture page:', error);
     event.sender.send('screenshot-captured', { success: false, error: error.message });
   }
 });
+
 
 ipcMain.on('set-default-browser', () => {
   app.setAsDefaultProtocolClient('http');
@@ -636,6 +897,7 @@ ipcMain.on('set-default-browser', () => {
 
 app.on('web-contents-created', (event, contents) => {
   const handleWindowOpen = ({ url, features, disposition }) => {
+
     // 1. Detect if this is a legitimate popup (typical for Login/OAuth)
     // - Features present (width/height defined by site)
     // - Specific identity provider domains
@@ -667,9 +929,32 @@ app.on('web-contents-created', (event, contents) => {
 
   contents.setWindowOpenHandler(handleWindowOpen);
 
-  // Unified Download Manager (v0.1.5) - Initialized once on boot
+  contents.on('before-input-event', (event, input) => {
+    const isReload = (input.control && input.key.toLowerCase() === 'r') || input.key === 'F5';
+    if (isReload) {
+      event.preventDefault();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('context-menu-command', { command: 'reload' });
+      }
+    }
+  });
+
+
+  // Explicitly enforce tab redirection on Webviews (Electron 30+ strict requirement)
+  contents.on('did-attach-webview', (e, webContents) => {
+    webContents.setWindowOpenHandler(handleWindowOpen);
+  });
+});
+
+
+app.whenReady().then(async () => {
+  try {
+    createWindow();
+
+    // Unified Download Manager (v0.1.5) - Initialized once on boot
+
   session.fromPartition('persist:leef-session').on('will-download', (event, item) => {
-    const filename = item.getFilename();
+    const filename = item.getFilename() || 'Downloading file...';
     const totalBytes = item.getTotalBytes();
 
     if (globalSettings.askDownload) {
@@ -680,67 +965,90 @@ app.on('web-contents-created', (event, contents) => {
       });
     }
 
+    const dlId = String(item.getStartTime());
+    activeDownloads.set(dlId, item);
+
     // Send initial "started" event
-    if (mainWindow) {
-      mainWindow.webContents.send('download-status', {
-        id: item.getStartTime(),
-        name: filename,
-        status: 'started',
-        total: totalBytes
-      });
-    }
+    safeSend('download-status', {
+      id: dlId,
+      name: filename,
+      url: item.getURL(),
+      status: 'started',
+      total: totalBytes
+    });
+
+
+    const progressInterval = setInterval(() => {
+      try {
+        const state = item.getState();
+        
+        safeSend('download-status', {
+          id: dlId,
+          received: item.getReceivedBytes(),
+          total: item.getTotalBytes(),
+          status: 'progressing',
+          state: state
+        });
+      } catch (e) {
+        clearInterval(progressInterval);
+      }
+    }, 500);
+
+
+
+
 
     item.on('updated', (event, state) => {
       if (state === 'interrupted') {
-        if (mainWindow) mainWindow.webContents.send('download-status', { id: item.getStartTime(), status: 'interrupted' });
+        safeSend('download-status', { id: dlId, status: 'interrupted' });
       } else if (state === 'progressing') {
         if (item.isPaused()) {
-          if (mainWindow) mainWindow.webContents.send('download-status', { id: item.getStartTime(), status: 'paused' });
-        } else {
-          if (mainWindow) {
-            mainWindow.webContents.send('download-status', {
-              id: item.getStartTime(),
-              received: item.getReceivedBytes(),
-              status: 'progressing'
-            });
-          }
+          safeSend('download-status', { id: dlId, status: 'paused' });
         }
       }
     });
+
 
     item.once('done', (event, state) => {
+      clearInterval(progressInterval);
+      activeDownloads.delete(dlId);
       if (state === 'completed') {
-        if (mainWindow) {
-          mainWindow.webContents.send('download-status', {
-            id: item.getStartTime(),
-            status: 'completed',
-            path: item.getSavePath()
-          });
-        }
+        safeSend('download-status', {
+          id: dlId,
+          status: 'completed',
+          path: item.getSavePath()
+        });
       } else {
-        if (mainWindow) mainWindow.webContents.send('download-status', { id: item.getStartTime(), status: 'failed' });
+        safeSend('download-status', { id: dlId, status: state === 'cancelled' ? 'cancelled' : 'failed' });
       }
+
     });
-  });
 
-  // Explicitly enforce tab redirection on Webviews (Electron 30+ strict requirement)
-  contents.on('did-attach-webview', (e, webContents) => {
-    webContents.setWindowOpenHandler(handleWindowOpen);
-  });
-});
 
-app.whenReady().then(async () => {
-  createWindow();
+  });
 
   // Load initial adblocker if enabled in local storage (simplified for main process)
   // We'll wait for the renderer to apply-settings on boot, but we can check for updates
-  setTimeout(() => {
-    if (globalSettings.autoCheckUpdates !== false) {
-      checkForUpdates();
+    if (!isRecoveryMode) {
+      setTimeout(() => {
+        if (globalSettings.autoCheckUpdates !== false) {
+          checkForUpdates();
+        }
+      }, 3000);
     }
-  }, 3000);
+  } catch (err) {
+    console.error('CRITICAL STARTUP ERROR:', err);
+    isRecoveryMode = true;
+    startupError = err.stack || err.message;
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createWindow();
+    } else {
+      mainWindow.loadFile('recovery.html');
+    }
+  }
 
   app.on('activate', function () {
+
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });

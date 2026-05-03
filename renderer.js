@@ -325,6 +325,8 @@ class SettingsManager {
       const badge = document.getElementById('update-status-badge');
       const btn = document.getElementById('btn-check-updates');
       const toastAction = document.getElementById('leef-toast-action');
+      const primaryBtn = document.getElementById('btn-toast-primary');
+      const secondaryBtn = document.getElementById('btn-toast-secondary');
 
       if (btn) {
         btn.textContent = 'Check for Updates Now';
@@ -346,19 +348,60 @@ class SettingsManager {
         }
 
         if (window.toastManager) {
-          window.toastManager.show('✨ Update Available', `${displayVersion} is now available for download!`, 12000);
+          window.toastManager.show('✨ Update Found', `${displayVersion} is available. Do you want to download and install it?`, 20000);
 
-          if (toastAction) {
-            toastAction.style.display = 'block';
-            const actionBtn = toastAction.querySelector('button');
-            actionBtn.textContent = 'View on GitHub';
-            actionBtn.onclick = () => {
+          if (toastAction && primaryBtn && secondaryBtn) {
+            toastAction.style.display = 'flex';
+            primaryBtn.style.display = 'block';
+            primaryBtn.textContent = 'Download & Install';
+            primaryBtn.onclick = () => {
+              ipc.send('start-download');
+              if (window.toastManager) window.toastManager.show('⏳ Starting Download', 'The update will download in the background.', 4000);
+            };
+
+            secondaryBtn.style.display = 'block';
+            secondaryBtn.textContent = 'View on GitHub';
+            secondaryBtn.onclick = () => {
               window.tabManager.createTab(`https://github.com/git-QTech/leef/releases/tag/${tag}`);
             };
           }
         }
       }
     });
+
+    ipc.on('update-download-progress', (event, progress) => {
+      const badge = document.getElementById('update-status-badge');
+      if (badge) {
+        badge.textContent = `[DOWNLOADING ${Math.floor(progress.percent)}%]`;
+      }
+    });
+
+    ipc.on('update-downloaded', (event, info) => {
+      const badge = document.getElementById('update-status-badge');
+      const toastAction = document.getElementById('leef-toast-action');
+      const primaryBtn = document.getElementById('btn-toast-primary');
+      const secondaryBtn = document.getElementById('btn-toast-secondary');
+
+      if (badge) {
+        badge.textContent = '[RESTART READY]';
+        badge.className = 'status-badge active';
+      }
+
+      if (window.toastManager) {
+        window.toastManager.show('🚀 Update Ready', 'The update has been downloaded and is ready to install.', 20000);
+
+        if (toastAction && primaryBtn && secondaryBtn) {
+          toastAction.style.display = 'flex';
+          primaryBtn.textContent = 'Restart Now';
+          primaryBtn.onclick = () => {
+            ipc.send('restart-to-update');
+          };
+          secondaryBtn.style.display = 'none'; // Hide GitHub button on the final step
+        }
+      }
+    });
+
+
 
     const btnFlags = document.getElementById('btn-flags');
     if (btnFlags) {
@@ -1035,14 +1078,24 @@ class TabManager {
         (function() {
           if (window.__leefHooked) return;
           window.__leefHooked = true;
+          
           document.addEventListener('click', (e) => {
             const a = e.target.closest('a');
-            if (!a || !a.href) return;
-            // Catch middle clicks and target="_blank"
-            if (e.button === 1 || a.target === '_blank') {
+            if (a && a.href && a.target === '_blank') {
               e.preventDefault();
               e.stopPropagation();
               console.log('LEEF_NEW_TAB:' + a.href);
+            }
+          }, true);
+
+          document.addEventListener('auxclick', (e) => {
+            if (e.button === 1) { // Middle click
+              const a = e.target.closest('a');
+              if (a && a.href) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('LEEF_NEW_TAB:' + a.href);
+              }
             }
           }, true);
         })();
@@ -1501,7 +1554,8 @@ class TabManager {
         selectionText: window.getSelection().toString(),
         canGoBack: false,
         canGoForward: false,
-        editFlags: {}
+        editFlags: {},
+        isBrowserUI: true
       };
 
       try {
@@ -1647,8 +1701,10 @@ class DownloadManager {
     this.toolbarRing = document.getElementById('toolbar-dl-ring');
     this.toolbarSvg = document.querySelector('.dl-progress-ring');
     this.downloads = new Map();
+    this.ipc = window.require('electron').ipcRenderer;
     this.bindEvents();
   }
+
 
   bindEvents() {
     if (this.el) {
@@ -1669,17 +1725,30 @@ class DownloadManager {
     });
 
     window.require('electron').ipcRenderer.on('download-status', (event, data) => {
+      const id = String(data.id);
       if (data.status === 'started') {
-        this.downloads.set(data.id, { ...data, received: 0 });
-        this.renderItem(data.id);
+        this.downloads.set(id, { ...data, id, received: 0, startTime: Date.now() });
+        this.renderItem(id);
         // Show dropdown when download starts
         this.dropdown.style.display = 'block';
       } else if (data.status === 'progressing') {
-        const dl = this.downloads.get(data.id);
+        const dl = this.downloads.get(id);
         if (dl) {
           dl.received = data.received;
-          this.updateItemProgress(data.id);
+          if (data.total) dl.total = data.total;
+          if (data.state) dl.state = data.state;
+          
+          if (dl.status === 'paused') {
+            dl.status = 'progressing';
+            this.renderItem(id);
+          } else {
+            dl.status = 'progressing';
+            this.updateItemProgress(id);
+          }
         }
+
+
+
       } else if (data.status === 'completed') {
         const dl = this.downloads.get(data.id);
         if (dl) {
@@ -1688,15 +1757,32 @@ class DownloadManager {
           this.renderItem(data.id);
           this.updateToolbarProgress();
         }
-      } else if (data.status === 'failed' || data.status === 'interrupted') {
-        const dl = this.downloads.get(data.id);
+      } else if (data.status === 'failed' || data.status === 'interrupted' || data.status === 'cancelled') {
+        const id = String(data.id);
+        const dl = this.downloads.get(id);
         if (dl) {
-          dl.status = 'failed';
-          this.renderItem(data.id);
+          dl.status = data.status;
+          this.renderItem(id);
           this.updateToolbarProgress();
+        }
+      } else if (data.status === 'paused') {
+        const id = String(data.id);
+        const dl = this.downloads.get(id);
+        if (dl) {
+          dl.status = 'paused';
+          this.renderItem(id);
         }
       }
     });
+  }
+
+  formatBytes(bytes, decimals = 1) {
+    if (!bytes || bytes <= 0) return '0 B';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
   }
 
   renderItem(id) {
@@ -1712,29 +1798,108 @@ class DownloadManager {
     }
 
     const isDone = dl.status === 'completed';
+    const isCancelled = dl.status === 'cancelled';
+    const isFailed = dl.status === 'failed' || dl.status === 'interrupted' || isCancelled;
+    const isPaused = dl.status === 'paused';
     const progress = dl.total > 0 ? Math.round((dl.received / dl.total) * 100) : 0;
+    const displayName = BrowserUtils.sanitize(dl.name || 'Downloading...');
+
+    let statusText = isDone ? 'Finished' : (isCancelled ? 'Cancelled' : (isFailed ? 'Failed' : (isPaused ? 'Paused' : progress + '%')));
+    
+    let errorHTML = '';
+    if (isFailed && !isCancelled) {
+        errorHTML = `<div style="color: #d32f2f; font-size: 0.75rem; text-align: center; margin-bottom: 4px;">Download failed. Check storage or network.</div>`;
+    }
 
     itemEl.innerHTML = `
-      <div class="download-info">
-        <span class="download-name" title="${dl.name}">${dl.name}</span>
-        <span class="download-percent">${isDone ? 'Finished' : progress + '%'}</span>
+      <div class="download-info" style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+        <span class="download-name" title="${displayName}" style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;">${displayName}</span>
+        <span class="download-percent" style="font-size: 0.8rem; opacity: 0.7;">${statusText}</span>
       </div>
-      <div class="download-progress-container" style="display: ${isDone ? 'none' : 'block'}">
-        <div class="download-progress-bar" id="pb-${id}" style="width: ${progress}%"></div>
+
+      <div class="download-details" style="display: ${isDone || isFailed ? 'none' : 'flex'}; justify-content: space-between; font-size: 0.75rem; opacity: 0.6; margin-bottom: 6px;">
+        <span class="dl-size-info">${this.formatBytes(dl.received)} / ${this.formatBytes(dl.total)}</span>
+        <span class="dl-speed-info">0 KB/s</span>
       </div>
-      <div class="download-actions" style="display: ${isDone ? 'flex' : 'none'}">
-        <button class="settings-btn" style="padding: 4px 10px; font-size: 0.75rem;" onclick="window.require('electron').ipcRenderer.send('show-item-in-folder', '${dl.path.replace(/\\/g, '\\\\')}')">Open Folder</button>
+
+      <div class="download-progress-container" style="height: 6px; background: rgba(0,0,0,0.06); border-radius: 3px; overflow: hidden; margin-bottom: 8px; display: ${isDone || isFailed ? 'none' : 'block'}">
+        <div class="download-progress-bar" id="pb-${id}" style="width: ${progress}%; height: 100%; background: var(--primary-color); transition: width 0.3s; opacity: ${isPaused ? 0.5 : 1};"></div>
+      </div>
+      
+      <div class="download-actions" style="display: ${isDone ? 'flex' : 'none'}; gap: 8px;">
+        <button class="settings-btn btn-open-folder" style="padding: 4px 10px; font-size: 0.75rem; width: 100%;">Open in Folder</button>
+      </div>
+
+      <div class="download-actions-active" style="display: ${!isDone && !isFailed ? 'flex' : 'none'}; gap: 8px;">
+        <button class="settings-btn btn-pause-resume" style="padding: 4px 10px; font-size: 0.75rem; flex: 1;">${isPaused ? 'Resume' : 'Pause'}</button>
+        <button class="settings-btn btn-cancel" style="padding: 4px 10px; font-size: 0.75rem; flex: 1;">Cancel</button>
+      </div>
+
+      <div class="download-actions-failed" style="display: ${isFailed ? 'flex' : 'none'}; gap: 8px; flex-direction: column;">
+        ${errorHTML}
+        <button class="settings-btn btn-retry" style="padding: 4px 10px; font-size: 0.75rem; width: 100%;">Retry Download</button>
       </div>
     `;
+
+    if (isDone) {
+      const openBtn = itemEl.querySelector('.btn-open-folder');
+      if (openBtn) {
+        openBtn.onclick = () => {
+          this.ipc.send('show-item-in-folder', dl.path);
+        };
+      }
+    }
+
+    if (!isDone && !isFailed) {
+      const prBtn = itemEl.querySelector('.btn-pause-resume');
+      const cancelBtn = itemEl.querySelector('.btn-cancel');
+      if (prBtn) prBtn.onclick = () => this.ipc.send(isPaused ? 'resume-download' : 'pause-download', id);
+      if (cancelBtn) cancelBtn.onclick = () => this.ipc.send('cancel-download', id);
+    }
+
+    if (isFailed) {
+      const retryBtn = itemEl.querySelector('.btn-retry');
+      if (retryBtn) {
+        retryBtn.onclick = () => {
+          this.ipc.send('retry-download', dl.url);
+        }
+      }
+    }
   }
 
   updateItemProgress(id) {
     const dl = this.downloads.get(id);
+    if (!dl) return;
+
+    const now = Date.now();
+    const lastTime = dl.lastTime || dl.startTime || now;
+    const lastReceived = dl.lastReceived || 0;
+    
+    // Calculate speed (bytes per second)
+    const timeDiff = (now - lastTime) / 1000; // seconds
+    if (timeDiff >= 0.5) { // Update speed every 0.5s
+      const bytesDiff = dl.received - lastReceived;
+      const bps = bytesDiff / timeDiff;
+      
+      const itemNode = document.getElementById(`dl-${id}`);
+      const speedEl = itemNode ? itemNode.querySelector('.dl-speed-info') : null;
+      if (speedEl) speedEl.textContent = this.formatBytes(bps) + '/s';
+
+      
+      dl.lastTime = now;
+      dl.lastReceived = dl.received;
+    }
+
     const progress = dl.total > 0 ? Math.round((dl.received / dl.total) * 100) : 0;
     const pb = document.getElementById(`pb-${id}`);
-    const percent = document.querySelector(`#dl-${id} .download-percent`);
+    const itemNode = document.getElementById(`dl-${id}`);
+    const percent = itemNode ? itemNode.querySelector('.download-percent') : null;
+    const sizeEl = itemNode ? itemNode.querySelector('.dl-size-info') : null;
+
     if (pb) pb.style.width = progress + '%';
     if (percent) percent.textContent = progress + '%';
+    if (sizeEl) sizeEl.textContent = `${this.formatBytes(dl.received)} / ${this.formatBytes(dl.total)}`;
+    
     this.updateToolbarProgress();
   }
 
@@ -1766,6 +1931,7 @@ class DownloadManager {
     }
   }
 }
+
 
 class QuickSettingsManager {
   constructor() {

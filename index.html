@@ -266,8 +266,28 @@
         <h1>What's New in Leef</h1>
         <p class="changelog-subtitle">Discover the latest updates and improvements</p>
         <div class="update-card">
+          <div class="update-date">May 3, 2026</div>
+          <h2>(v0.3.0)</h2>
+          <ul>
+            <li><strong>Recovery Menu (Safe Mode):</strong> Introduced a troubleshooting menu. Hold
+              <strong>Shift</strong> at startup or trigger it automatically after a crash to reset configurations or
+              rebuild your data.
+            </li>
+            <li><strong>Stabilized Navigation:</strong> Fixed middle-click (New Tab) behavior across all sites and added
+              smart context menus that distinguish between browser UI and web content.</li>
+            <li><strong>Enhanced Downloads:</strong> Full support for Pause, Resume, and Cancel. Screenshots taken
+              within the browser now automatically appear in your download manager for easy access.</li>
+            <li><strong>Window Management:</strong> Restricted Ctrl+R/F5 to reload only the active page instead of the
+              entire app, and fixed window persistence bugs.</li>
+            <li><strong>Bugfixes:</strong> Fixed a bug that would clear data on reload.</li>
+          </ul>
+
+        </div>
+
+        <div class="update-card">
+
           <div class="update-date">May 1, 2026</div>
-          <h2>Patch (v<span class="leef-version-val"></span>)</h2>
+          <h2>Patch (v0.2.1)</h2>
           <ul>
             <li><strong>Added Error Pages:</strong> Implemented brand-new, helpful error pages that show up when you're
               offline or a site fails to load. Includes diagnostic error codes and easy reconnect options.</li>
@@ -832,10 +852,11 @@
       <div class="leef-toast-title">YouTube Performance Warning</div>
       <div class="leef-toast-msg">Streaming above 1440p on YouTube may slow down Leef. For the best experience, keep
         quality at 1440p or below.</div>
-      <div id="leef-toast-action" style="display: none; margin-top: 8px;">
-        <button class="settings-btn"
-          style="padding: 4px 12px; font-size: 0.8rem; background: var(--topbar-bg); pointer-events: auto;">View Release
-          on GitHub</button>
+      <div id="leef-toast-action" style="display: none; margin-top: 10px; gap: 8px;">
+        <button id="btn-toast-primary" class="settings-btn"
+          style="flex: 1; padding: 6px 12px; font-size: 0.8rem; background: var(--primary-color); color: white; border: none; pointer-events: auto; cursor: pointer; border-radius: 6px;">Action</button>
+        <button id="btn-toast-secondary" class="settings-btn"
+          style="flex: 1; padding: 6px 12px; font-size: 0.8rem; background: rgba(0,0,0,0.06); color: #333; border: none; pointer-events: auto; cursor: pointer; border-radius: 6px;">Secondary</button>
       </div>
     </div>
     <button class="leef-toast-close" id="leef-toast-close" style="pointer-events: auto;">×</button>
