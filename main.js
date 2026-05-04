@@ -53,6 +53,7 @@ let globalSettings = {};
 let adblockerEnabled = false;
 let adblockerLoading = false;
 const activeDownloads = new Map();
+let closedTabsCount = 0;
 
 
 function safeSend(channel, ...args) {
@@ -208,7 +209,7 @@ let startupError = 'None';
 async function generateDiagnosticLog(error = 'None') {
   const userData = app.getPath('userData');
   const logPath = path.join(userData, 'leef-diagnostic.txt');
-  
+
   const scrub = (str) => {
     if (!str) return '';
     const home = os.homedir().replace(/\\/g, '\\\\');
@@ -341,12 +342,27 @@ function createWindow() {
 
   // mainWindow.webContents.openDevTools();
 
-  // Global Testing Shortcut: Ctrl+Shift+O (v0.2.1)
-  mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.control && input.shift && input.key.toLowerCase() === 'o' && input.type === 'keyDown') {
-      safeSend('trigger-offline-game');
-      event.preventDefault();
-    }
+  // Consolidated global shortcut handler for all webContents (v0.3.5)
+  app.on('web-contents-created', (event, contents) => {
+    contents.setMaxListeners(100);
+    contents.on('before-input-event', (e, input) => {
+      // Find in Page: Ctrl + F
+      if (input.control && !input.shift && input.key.toLowerCase() === 'f' && input.type === 'keyDown') {
+        safeSend('trigger-find-in-page');
+        e.preventDefault();
+      }
+
+      // Offline Game: Ctrl + Shift + O
+      if (input.control && input.shift && input.key.toLowerCase() === 'o' && input.type === 'keyDown') {
+        safeSend('trigger-offline-game');
+        e.preventDefault();
+      }
+    });
+
+    // DRM Detection: Triggered when Widevine/CDM is requested
+    contents.on('select-key-system', (e, keySystem) => {
+      safeSend('drm-detected', { webContentsId: contents.id });
+    });
   });
 }
 
@@ -379,7 +395,14 @@ ipcMain.on('apply-settings', async (event, settings) => {
   if (settings.language === 'it') acceptLang = 'it-IT,it,en;q=0.9';
 
   // Custom User Agent & Language
-  const ua = settings.customUa || sess.getUserAgent().replace(/Electron\/[0-9.]+\s/g, '');
+  let ua = settings.customUa || sess.getUserAgent().replace(/Electron\/[0-9.]+\s/g, '');
+  
+  // Stealth User Agent (Labs): Remove "Leef Browser/vX.X.X" if flag is enabled
+  if (settings.labs?.fingerprint_master && settings.labs?.stealth_ua) {
+    ua = ua.replace(/Leef\s?Browser\/[0-9.]+\s?/gi, '');
+  }
+  
+  console.log('Applying User Agent:', ua);
   sess.setUserAgent(ua, acceptLang);
 
   // Initialize Ghostery if Comprehensive mode is selected — await so the handler
@@ -428,6 +451,16 @@ ipcMain.on('apply-settings', async (event, settings) => {
     delete headers['YouTube-Restrict'];
     delete headers['Accept-Language'];
     headers['Accept-Language'] = acceptLang;
+
+    // Stealth User Agent (Header Fallback)
+    if (settings.labs?.fingerprint_master && settings.labs?.stealth_ua && headers['User-Agent']) {
+      headers['User-Agent'] = headers['User-Agent'].replace(/Leef\s?Browser\/[0-9.]+\s?/gi, '');
+    }
+
+    // DNT Header (Labs)
+    if (settings.labs?.fingerprint_master && settings.labs?.dnt_header) {
+      headers['DNT'] = '1';
+    }
 
     callback({ requestHeaders: headers });
   });
@@ -525,6 +558,10 @@ ipcMain.on('permission-response', (event, data) => {
   }
 });
 
+ipcMain.on('update-closed-tabs-count', (event, count) => {
+  closedTabsCount = count;
+});
+
 ipcMain.on('recovery-action', async (event, action) => {
   if (!mainWindow) return;
 
@@ -536,7 +573,7 @@ ipcMain.on('recovery-action', async (event, action) => {
       app.relaunch();
       app.exit();
       break;
-    
+
     case 'rebuild-appdata':
       // Nuclear option
       const fullSess = session.fromPartition('persist:leef-session');
@@ -709,33 +746,51 @@ ipcMain.on('show-context-menu', (event, params) => {
 ipcMain.on('show-tab-context-menu', (event, data) => {
   const menu = new Menu();
 
+  if (data.tabId) {
+    menu.append(new MenuItem({
+      label: 'Duplicate Tab',
+      click: () => event.sender.send('tab-command', { command: 'duplicate', tabId: data.tabId })
+    }));
+
+    menu.append(new MenuItem({ type: 'separator' }));
+
+    menu.append(new MenuItem({
+      label: data.isPinned ? 'Unpin Tab' : 'Pin Tab',
+      click: () => event.sender.send('tab-command', { command: 'toggle-pin', tabId: data.tabId })
+    }));
+
+    menu.append(new MenuItem({
+      label: data.isMuted ? 'Unmute Tab' : 'Mute Tab',
+      click: () => event.sender.send('tab-command', { command: 'toggle-mute', tabId: data.tabId })
+    }));
+
+    menu.append(new MenuItem({ type: 'separator' }));
+
+    menu.append(new MenuItem({
+      label: 'Close Tab',
+      click: () => event.sender.send('tab-command', { command: 'close', tabId: data.tabId })
+    }));
+
+    menu.append(new MenuItem({
+      label: 'Close Other Tabs',
+      click: () => event.sender.send('tab-command', { command: 'close-others', tabId: data.tabId })
+    }));
+
+    menu.append(new MenuItem({ type: 'separator' }));
+  } else {
+    menu.append(new MenuItem({
+      label: 'New Tab',
+      accelerator: 'CmdOrCtrl+T',
+      click: () => event.sender.send('tab-command', { command: 'new-tab' })
+    }));
+    menu.append(new MenuItem({ type: 'separator' }));
+  }
+
   menu.append(new MenuItem({
-    label: 'Duplicate Tab',
-    click: () => event.sender.send('tab-command', { command: 'duplicate', tabId: data.tabId })
-  }));
-
-  menu.append(new MenuItem({ type: 'separator' }));
-
-  menu.append(new MenuItem({
-    label: data.isPinned ? 'Unpin Tab' : 'Pin Tab',
-    click: () => event.sender.send('tab-command', { command: 'toggle-pin', tabId: data.tabId })
-  }));
-
-  menu.append(new MenuItem({
-    label: data.isMuted ? 'Unmute Tab' : 'Mute Tab',
-    click: () => event.sender.send('tab-command', { command: 'toggle-mute', tabId: data.tabId })
-  }));
-
-  menu.append(new MenuItem({ type: 'separator' }));
-
-  menu.append(new MenuItem({
-    label: 'Close Tab',
-    click: () => event.sender.send('tab-command', { command: 'close', tabId: data.tabId })
-  }));
-
-  menu.append(new MenuItem({
-    label: 'Close Other Tabs',
-    click: () => event.sender.send('tab-command', { command: 'close-others', tabId: data.tabId })
+    label: 'Reopen Closed Tab',
+    enabled: closedTabsCount > 0,
+    accelerator: 'CmdOrCtrl+Shift+T',
+    click: () => event.sender.send('reopen-closed-tab')
   }));
 
   const win = BrowserWindow.fromWebContents(event.sender);
@@ -785,7 +840,7 @@ ipcMain.on('clear-site-data', async (event, domain) => {
       url = url.replace(/:\/\/\./, '://');
       await sess.cookies.remove(url, cookie.name);
     }
-  } catch(e) {
+  } catch (e) {
     console.error('Failed to clear site cookies:', e);
   }
 });
@@ -860,15 +915,15 @@ ipcMain.on('capture-page', async (event, data) => {
   try {
     const rect = data && data.rect ? data.rect : undefined;
     const image = await mainWindow.webContents.capturePage(rect);
-    
+
     // Copy to clipboard
     clipboard.writeImage(image);
-    
+
     const buffer = image.toPNG();
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `Leef_Screenshot_${timestamp}.png`;
     const filePath = path.join(app.getPath('downloads'), filename);
-    
+
     const dlId = 'screenshot-' + Date.now();
     const size = buffer.length;
 
@@ -961,82 +1016,82 @@ app.whenReady().then(async () => {
 
     // Unified Download Manager (v0.1.5) - Initialized once on boot
 
-  session.fromPartition('persist:leef-session').on('will-download', (event, item) => {
-    const filename = item.getFilename() || 'Downloading file...';
-    const totalBytes = item.getTotalBytes();
+    session.fromPartition('persist:leef-session').on('will-download', (event, item) => {
+      const filename = item.getFilename() || 'Downloading file...';
+      const totalBytes = item.getTotalBytes();
 
-    if (globalSettings.askDownload) {
-      item.setSaveDialogOptions({
-        title: 'Save File',
-        defaultPath: filename,
-        buttonLabel: 'Save'
+      if (globalSettings.askDownload) {
+        item.setSaveDialogOptions({
+          title: 'Save File',
+          defaultPath: filename,
+          buttonLabel: 'Save'
+        });
+      }
+
+      const dlId = String(item.getStartTime());
+      activeDownloads.set(dlId, item);
+
+      // Send initial "started" event
+      safeSend('download-status', {
+        id: dlId,
+        name: filename,
+        url: item.getURL(),
+        status: 'started',
+        total: totalBytes
       });
-    }
-
-    const dlId = String(item.getStartTime());
-    activeDownloads.set(dlId, item);
-
-    // Send initial "started" event
-    safeSend('download-status', {
-      id: dlId,
-      name: filename,
-      url: item.getURL(),
-      status: 'started',
-      total: totalBytes
-    });
 
 
-    const progressInterval = setInterval(() => {
-      try {
-        const state = item.getState();
-        
-        safeSend('download-status', {
-          id: dlId,
-          received: item.getReceivedBytes(),
-          total: item.getTotalBytes(),
-          status: 'progressing',
-          state: state
-        });
-      } catch (e) {
-        clearInterval(progressInterval);
-      }
-    }, 500);
+      const progressInterval = setInterval(() => {
+        try {
+          const state = item.getState();
 
-
-
-
-
-    item.on('updated', (event, state) => {
-      if (state === 'interrupted') {
-        safeSend('download-status', { id: dlId, status: 'interrupted' });
-      } else if (state === 'progressing') {
-        if (item.isPaused()) {
-          safeSend('download-status', { id: dlId, status: 'paused' });
+          safeSend('download-status', {
+            id: dlId,
+            received: item.getReceivedBytes(),
+            total: item.getTotalBytes(),
+            status: 'progressing',
+            state: state
+          });
+        } catch (e) {
+          clearInterval(progressInterval);
         }
-      }
+      }, 500);
+
+
+
+
+
+      item.on('updated', (event, state) => {
+        if (state === 'interrupted') {
+          safeSend('download-status', { id: dlId, status: 'interrupted' });
+        } else if (state === 'progressing') {
+          if (item.isPaused()) {
+            safeSend('download-status', { id: dlId, status: 'paused' });
+          }
+        }
+      });
+
+
+      item.once('done', (event, state) => {
+        clearInterval(progressInterval);
+        activeDownloads.delete(dlId);
+        if (state === 'completed') {
+          safeSend('download-status', {
+            id: dlId,
+            status: 'completed',
+            path: item.getSavePath()
+          });
+        } else {
+          safeSend('download-status', { id: dlId, status: state === 'cancelled' ? 'cancelled' : 'failed' });
+        }
+
+      });
+
+
     });
 
-
-    item.once('done', (event, state) => {
-      clearInterval(progressInterval);
-      activeDownloads.delete(dlId);
-      if (state === 'completed') {
-        safeSend('download-status', {
-          id: dlId,
-          status: 'completed',
-          path: item.getSavePath()
-        });
-      } else {
-        safeSend('download-status', { id: dlId, status: state === 'cancelled' ? 'cancelled' : 'failed' });
-      }
-
-    });
-
-
-  });
-
-  // Load initial adblocker if enabled in local storage (simplified for main process)
-  // We'll wait for the renderer to apply-settings on boot, but we can check for updates
+    // Load initial adblocker if enabled in local storage (simplified for main process)
+    // We'll wait for the renderer to apply-settings on boot, but we can check for updates
     if (!isRecoveryMode) {
       setTimeout(() => {
         if (globalSettings.autoCheckUpdates !== false) {

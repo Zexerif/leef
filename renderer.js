@@ -10,7 +10,7 @@ async function initVersion() {
     const response = await fetch('./package.json');
     const pkg = await response.json();
     APP_VERSION = pkg.version;
-    
+
     // Auto-populate any elements that need the version string
     document.querySelectorAll('.leef-version-val').forEach(el => {
       el.textContent = APP_VERSION;
@@ -91,7 +91,7 @@ class SettingsManager {
       tracking: 'standard',
       httpsOnly: true,
       adBlockerMode: 'none', // none, basic, comprehensive
-      backgroundLimit: true,
+      backgroundLimit: false,
       allowNotifications: true,
       askDownload: false,
       blockAIOverview: true,
@@ -108,18 +108,20 @@ class SettingsManager {
     this.bindEvents();
     // Sync form elements to loaded values once DOM is ready
     this.syncUIToSettings();
+    // Apply to main process immediately on startup
+    this.sendSettingsToMain();
   }
 
   loadSavedSettings() {
     try {
       const saved = JSON.parse(localStorage.getItem('leef_settings') || '{}');
-      
+
       // Fallback: If saved language is not supported anymore, default to en
       const supported = ['en', 'en-gb', 'en-ca'];
       if (saved.language && !supported.includes(saved.language)) {
         saved.language = 'en';
       }
-      
+
       return { ...this.defaultSettings, ...saved };
     } catch (e) {
       return { ...this.defaultSettings };
@@ -176,7 +178,9 @@ class SettingsManager {
   sendSettingsToMain() {
     // Send current settings to the main process so network rules apply on startup
     try {
-      window.require('electron').ipcRenderer.send('apply-settings', this.currentSettings);
+      const labs = JSON.parse(localStorage.getItem('leef_labs_flags') || '{}');
+      const settingsWithLabs = { ...this.currentSettings, labs };
+      window.require('electron').ipcRenderer.send('apply-settings', settingsWithLabs);
     } catch (e) { console.log('IPC not available', e); }
   }
 
@@ -203,13 +207,21 @@ class SettingsManager {
       });
     });
 
+    const btnOpenPrivacySettings = document.getElementById('btn-open-privacy-settings');
+    if (btnOpenPrivacySettings) {
+      btnOpenPrivacySettings.addEventListener('click', () => {
+        if (window.tabManager) window.tabManager.createTab('privacy');
+      });
+    }
+
     // IPC Buttons
     if (UI.buttons.clearData) {
       UI.buttons.clearData.addEventListener('click', () => {
         try {
-          window.require('electron').ipcRenderer.send('clear-data');
-          localStorage.removeItem('leef_onboarding_done');
-          if (window.toastManager) window.toastManager.show('🧹 Data Cleared', 'History, cache, and onboarding status have been cleared.', 5000);
+          if (confirm('⚠️ FACTORY RESET: This will clear all settings, labs, history, and bookmarks. The browser will then relaunch. Proceed?')) {
+            localStorage.clear();
+            window.require('electron').ipcRenderer.send('recovery-action', 'rebuild-appdata');
+          }
         } catch (e) { }
       });
     }
@@ -454,6 +466,9 @@ class SettingsManager {
 
       // Update adblock badge immediately based on current mode
       this.updateAdblockBadge(this.currentSettings.adBlockerMode);
+      
+      // Sync Privacy Manager UI (v0.3.3)
+      if (window.privacyManager) window.privacyManager.updateUI();
     } catch (e) { console.log("IPC not available", e); }
   }
 
@@ -860,6 +875,23 @@ class TabManager {
     this.lastTabOpen = { url: '', time: 0 };
 
     this.bindGlobalEvents();
+
+    // DRM Detection Listener
+    window.require('electron').ipcRenderer.on('drm-detected', (event, data) => {
+      this.tabs.forEach(tab => {
+        if (tab.webviewEl) {
+          try {
+            if (tab.webviewEl.getWebContentsId() === data.webContentsId) {
+              tab.hasDRM = true;
+              if (tab.id === this.activeTabId) {
+                const drmIndicator = document.getElementById('drm-indicator');
+                if (drmIndicator) drmIndicator.style.display = 'flex';
+              }
+            }
+          } catch (e) { }
+        }
+      });
+    });
   }
 
   getActiveTab() {
@@ -883,11 +915,13 @@ class TabManager {
     }
     this.lastTabOpen = { url: route, time: now };
 
-    const isInternal = ['home', 'settings', 'changelog', 'credits', 'flags'].includes(route);
+    const isInternal = ['home', 'settings', 'changelog', 'credits', 'flags', 'privacy'].includes(route);
 
     // Hide labs view when navigating away
     const labsView = document.getElementById('flags-view');
     if (labsView) labsView.style.display = 'none';
+    const privacyView = document.getElementById('privacy-view');
+    if (privacyView) privacyView.style.display = 'none';
 
     const tabId = 'tab-' + this.tabCounter++;
     const tabEl = document.createElement('div');
@@ -931,10 +965,10 @@ class TabManager {
 
     const tabFavicon = document.createElement('div');
     tabFavicon.className = 'tab-favicon';
-    
+
     const tabTitle = document.createElement('span');
     tabTitle.className = 'tab-title';
-    tabTitle.textContent = route === 'home' ? 'Leef Browser | Home' : (route === 'settings' ? 'Settings' : (route === 'changelog' ? "What's New" : (route === 'credits' ? 'Credits' : (route === 'flags' ? 'Leef Labs' : 'Loading...'))));
+    tabTitle.textContent = route === 'home' ? 'Leef Browser | Home' : (route === 'settings' ? 'Settings' : (route === 'changelog' ? "What's New" : (route === 'credits' ? 'Credits' : (route === 'flags' ? 'Leef Labs' : (route === 'privacy' ? 'Privacy Center' : 'Loading...')))));
 
     const tabClose = document.createElement('button');
     tabClose.className = 'tab-close';
@@ -959,7 +993,8 @@ class TabManager {
       isMuted: false,
       isAudioPlaying: false,
       faviconUrl: null,
-      faviconEl: tabFavicon
+      faviconEl: tabFavicon,
+      lastActiveTime: Date.now()
     };
 
     this.tabs.push(tabObj);
@@ -1018,6 +1053,28 @@ class TabManager {
     });
 
     this.switchTab(tabId);
+
+    // Resource Freezer Loop (Labs)
+    if (!this._freezerInited) {
+      this._freezerInited = true;
+      setInterval(() => {
+        if (!window.labsManager || !window.labsManager.isFlagEnabled('resource_freezer')) return;
+        const now = Date.now();
+        this.tabs.forEach(t => {
+          if (t.id !== this.activeTabId && !t.isInternal && !t.isPinned && !t.isHibernated && t.lastActiveTime) {
+            const idleTime = now - t.lastActiveTime;
+            if (idleTime > 5 * 60 * 1000) { // 5 minutes
+              console.log(`Leef Labs: Hibernating tab ${t.id} (${t.title})`);
+              t.isHibernated = true;
+              t.hibernateUrl = t.webviewEl.getURL();
+              t.webviewEl.stop();
+              t.webviewEl.src = 'about:blank';
+              if (window.toastManager) window.toastManager.show('🧊 Tab Hibernated', `"${t.title}" was frozen to save RAM.`, 3000);
+            }
+          }
+        });
+      }, 30000); // Check every 30s
+    }
   }
 
   mountWebview(tab) {
@@ -1026,14 +1083,31 @@ class TabManager {
     tab.webviewEl.id = 'webview-' + tab.id;
     tab.webviewEl.setAttribute('allowpopups', '');
     tab.webviewEl.setAttribute('partition', 'persist:leef-session'); // CRITICAL: must match session in main.js
+    
+    // Background Tab Performance (v0.4.0)
+    // Prevent throttling unless the user explicitly enabled the background limiter.
+    if (!this.settings.currentSettings.backgroundLimit) {
+      tab.webviewEl.setAttribute('webpreferences', 'contextIsolation=yes, sandbox=no, nodeIntegration=no, backgroundThrottling=false');
+      tab.webviewEl.setAttribute('disableblinkfeatures', 'Throttling,TimerThrottling,IntersectionObserverThrottling');
+    } else {
+      tab.webviewEl.setAttribute('webpreferences', 'contextIsolation=yes, sandbox=no, nodeIntegration=no');
+    }
+
     UI.views.webviewsContainer.appendChild(tab.webviewEl);
+
+    // Find-in-page support
+    if (window.findManager) window.findManager.attachToWebview(tab.webviewEl);
 
     tab.webviewEl.addEventListener('did-start-loading', () => {
       tab.title = 'Loading...';
       tab.url = tab.webviewEl.src;
       tab.volumeBoost = 1; // Reset volume on moving to a new tab
       tab.blockedAds = 0; // Reset adblock stats on moving to a new tab
+      tab.hasDRM = false; // Reset DRM status
       if (this.activeTabId === tab.id) {
+        const drmIndicator = document.getElementById('drm-indicator');
+        if (drmIndicator) drmIndicator.style.display = 'none';
+
         if (window.quickSettingsManager && window.quickSettingsManager.sliderVolume) {
           window.quickSettingsManager.sliderVolume.value = 1;
         }
@@ -1059,6 +1133,12 @@ class TabManager {
       if (e.message && e.message.startsWith('LEEF_NEW_TAB:')) {
         const url = e.message.replace('LEEF_NEW_TAB:', '');
         this.createTab(url);
+      }
+    });
+
+    tab.webviewEl.addEventListener('did-start-navigation', (e) => {
+      if (e.isMainFrame && window.privacyManager) {
+        window.privacyManager.recordRequest(e.url.startsWith('https:'));
       }
     });
 
@@ -1170,8 +1250,146 @@ class TabManager {
         `);
       }
 
-      // YouTube Ad-Skip Script
+      // GHOST MODE (Labs)
+      if (window.labsManager && window.labsManager.isFlagEnabled('ghost_mode')) {
+        tab.webviewEl.executeJavaScript(`
+          (function() {
+            if (window.__leefGhostHooked) return;
+            window.__leefGhostHooked = true;
+            const originalGetContext = HTMLCanvasElement.prototype.getContext;
+            HTMLCanvasElement.prototype.getContext = function(type, attributes) {
+              const context = originalGetContext.apply(this, arguments);
+              if (type === '2d' && context) {
+                const originalGetImageData = context.getImageData;
+                context.getImageData = function(x, y, w, h) {
+                  const imageData = originalGetImageData.apply(this, arguments);
+                  const idx = Math.floor(Math.random() * (imageData.data.length / 4)) * 4;
+                  imageData.data[idx] = (imageData.data[idx] + (Math.random() > 0.5 ? 1 : -1)) % 256;
+                  return imageData;
+                };
+              }
+              return context;
+            };
+            const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+            HTMLCanvasElement.prototype.toDataURL = function() {
+              const ctx = this.getContext('2d');
+              if (ctx) {
+                const imageData = ctx.getImageData(0, 0, this.width, this.height);
+                const idx = Math.floor(Math.random() * (imageData.data.length / 4)) * 4;
+                imageData.data[idx] = (imageData.data[idx] + 1) % 256;
+                ctx.putImageData(imageData, 0, 0);
+              }
+              return originalToDataURL.apply(this, arguments);
+            };
+            console.log('Leef Labs: Ghost Mode Active');
+          })();
+        `);
+      }
+
+      // AUDIO SCRAMBLER (Labs) - Hardened
+      if (window.labsManager && window.labsManager.isFlagEnabled('audio_scrambler')) {
+        tab.webviewEl.executeJavaScript(`
+          (function() {
+            if (window.__leefAudioHooked) return;
+            window.__leefAudioHooked = true;
+            
+            // Hook AudioBuffer
+            const originalGetChannelData = AudioBuffer.prototype.getChannelData;
+            AudioBuffer.prototype.getChannelData = function() {
+              const data = originalGetChannelData.apply(this, arguments);
+              const idx = Math.floor(Math.random() * data.length);
+              data[idx] += (Math.random() - 0.5) * 1e-7;
+              return data;
+            };
+
+            // Hook AnalyserNode (frequency data)
+            const originalGetByteFreq = AnalyserNode.prototype.getByteFrequencyData;
+            AnalyserNode.prototype.getByteFrequencyData = function(array) {
+              originalGetByteFreq.apply(this, arguments);
+              for (let i = 0; i < array.length; i += 100) {
+                array[i] = (array[i] + Math.floor(Math.random() * 2)) % 256;
+              }
+            };
+
+            console.log('Leef Labs: Audio Scrambler (Hardened) Active');
+          })();
+        `);
+      }
+
+      // HARDWARE CLOAK (Labs) - Hardened with WebGL and Screen Masking
+      if (window.labsManager && window.labsManager.isFlagEnabled('hardware_cloak')) {
+        tab.webviewEl.executeJavaScript(`
+          (function() {
+            if (window.__leefHardwareHooked) return;
+            window.__leefHardwareHooked = true;
+            
+            // 1. Spec Spoofing
+            Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 4 });
+            Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+            
+            // 2. Screen Normalization
+            const s = window.screen;
+            Object.defineProperty(s, 'width', { get: () => 1920 });
+            Object.defineProperty(s, 'height', { get: () => 1080 });
+            Object.defineProperty(s, 'availWidth', { get: () => 1920 });
+            Object.defineProperty(s, 'availHeight', { get: () => 1040 });
+            
+            // 3. WebGL Masking
+            const maskWebGL = (proto) => {
+              const originalGetParameter = proto.getParameter;
+              proto.getParameter = function(parameter) {
+                // UNMASKED_VENDOR_WEBGL = 0x9245, UNMASKED_RENDERER_WEBGL = 0x9246
+                if (parameter === 0x9245) return 'Intel Inc.';
+                if (parameter === 0x9246) return 'Intel(R) UHD Graphics 620';
+                return originalGetParameter.apply(this, arguments);
+              };
+            };
+            if (window.WebGLRenderingContext) maskWebGL(WebGLRenderingContext.prototype);
+            if (window.WebGL2RenderingContext) maskWebGL(WebGL2RenderingContext.prototype);
+          })();
+        `);
+      }
+
+      // TIMEZONE SPOOF (Labs)
+      if (window.labsManager && window.labsManager.isFlagEnabled('timezone_spoof')) {
+        tab.webviewEl.executeJavaScript(`
+          (function() {
+            if (window.__leefTimezoneHooked) return;
+            window.__leefTimezoneHooked = true;
+            const originalResolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
+            Intl.DateTimeFormat.prototype.resolvedOptions = function() {
+              const options = originalResolvedOptions.apply(this, arguments);
+              options.timeZone = 'UTC';
+              return options;
+            };
+            const originalDateToString = Date.prototype.toString;
+            Date.prototype.toString = function() {
+              return this.toUTCString();
+            };
+            console.log('Leef Labs: Timezone Spoof (UTC) Active');
+          })();
+        `);
+      }
+
+      // FONT MASKING (Labs)
+      if (window.labsManager && window.labsManager.isFlagEnabled('font_mask')) {
+        tab.webviewEl.executeJavaScript(`
+          (function() {
+            if (window.__leefFontHooked) return;
+            window.__leefFontHooked = true;
+            if (window.FontFaceSet) {
+              const originalCheck = FontFaceSet.prototype.check;
+              FontFaceSet.prototype.check = function() { return true; };
+            }
+            console.log('Leef Labs: Font Masking Active');
+          })();
+        `);
+      }
+
+      // YouTube Ad-Protection (Standard + Labs Warp Speed)
       if (tab.url && tab.url.includes('youtube.com')) {
+        const isWarpEnabled = window.labsManager && window.labsManager.isFlagEnabled('yt_warp_speed');
+        
         const injectYTAdBlock = () => {
           tab.webviewEl.executeJavaScript(`
             (function() {
@@ -1179,27 +1397,42 @@ class TabManager {
               window.__leefYTAdBlock = true;
 
               function skipAd() {
-                // 1. Click skip button (multiple selectors for different YT versions)
-                const skipBtn = document.querySelector(
-                  '.ytp-skip-ad-button__text, .ytp-ad-skip-button-modern, .ytp-ad-skip-button, .ytp-skip-ad-button'
-                );
-                if (skipBtn) { skipBtn.click(); return; }
+                const video = document.querySelector('video');
+                const adShowing = document.querySelector('.ad-showing, .ad-interrupting, .video-ads');
+                const skipBtn = document.querySelector('.ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern');
 
-                // 2. For unskippable ads — mute and seek to end
-                const player = document.querySelector('.ad-showing video');
-                if (player && player.duration && !isNaN(player.duration) && isFinite(player.duration)) {
-                  player.muted = true;
-                  player.currentTime = player.duration;
+                // 1. Standard Skip (Default)
+                if (skipBtn) skipBtn.click();
+
+                // 2. Unskippable Ads Handling
+                const isAd = document.querySelector('.ad-showing, .ad-interrupting');
+                if (isAd && video) {
+                  if (${isWarpEnabled}) {
+                    // Warp Speed Mode: 16x playback
+                    if (video.playbackRate !== 16) {
+                      video.dataset.leefPrevRate = video.playbackRate;
+                      video.muted = true;
+                      video.playbackRate = 16;
+                    }
+                  } else {
+                    // Standard Mode: Seek to end
+                    if (video.duration > 0 && isFinite(video.duration) && video.currentTime < video.duration - 0.2) {
+                      video.muted = true;
+                      video.currentTime = video.duration;
+                    }
+                  }
+                } else if (video && video.playbackRate === 16) {
+                  // Restore state only if we were the ones who warped it
+                  video.playbackRate = parseFloat(video.dataset.leefPrevRate || 1);
+                  video.muted = false;
+                  delete video.dataset.leefPrevRate;
                 }
 
-                // 3. Dismiss anti-adblock enforcement modal
-                const enforceBtn = document.querySelector(
-                  'ytd-enforcement-message-view-model button[class*="dismiss"], ' +
-                  'tp-yt-paper-dialog .style-scope ytd-button-renderer:last-child button'
-                );
+                // 3. Dismiss Popups (Default)
+                const enforceBtn = document.querySelector('ytd-enforcement-message-view-model button[class*="dismiss"], tp-yt-paper-dialog .style-scope ytd-button-renderer:last-child button');
                 if (enforceBtn) enforceBtn.click();
 
-                // 4. Hide overlay banner ads (Download Chrome, etc) and feed ads
+                // 4. Hide Overlay Ads (Default)
                 if (!document.getElementById('__leef_yt_css')) {
                   const s = document.createElement('style');
                   s.id = '__leef_yt_css';
@@ -1217,7 +1450,7 @@ class TabManager {
                 }
               }
 
-              setInterval(skipAd, 500);
+              setInterval(skipAd, 300);
               skipAd();
             })();
           `).catch(() => { });
@@ -1243,19 +1476,41 @@ class TabManager {
     tab.webviewEl.addEventListener('media-paused', () => { tab.isAudioPlaying = false; this.updateTabUI(tab); });
     tab.webviewEl.addEventListener('media-started-playing', () => { tab.isAudioPlaying = true; this.updateTabUI(tab); });
 
-    // Offline Error Handling (v0.2.1)
+    // Offline Error Handling (v0.2.1) + Wayback Machine Suggest (Labs)
     tab.webviewEl.addEventListener('did-fail-load', (e) => {
       // Ignore code -3 (ABORTED) which happens on normal navigation/refresh
       if (e.errorCode === -3) return;
-      
+
       // CRITICAL: Prevent infinite loop if offline.html itself fails to load
       if (e.validatedURL.includes('offline.html')) {
         console.error('CRITICAL: offline.html failed to load. Stopping recursion.');
         return;
       }
-      
+
       console.warn('Navigation failed:', e.validatedURL, e.errorDescription);
-      
+
+      // Wayback Machine Suggest (Leef Labs)
+      if (window.labsManager && window.labsManager.isFlagEnabled('wayback_suggest') && (e.errorCode === -105 || e.errorCode === -106 || e.errorCode === -102)) {
+        if (window.toastManager) {
+          window.toastManager.show('📜 Site Offline?', `Page failed to load. Would you like to check for a version on the Wayback Machine?`, 10000);
+          const toastAction = document.getElementById('leef-toast-action');
+          const primaryBtn = document.getElementById('btn-toast-primary');
+          const secondaryBtn = document.getElementById('btn-toast-secondary');
+          if (toastAction && primaryBtn && secondaryBtn) {
+            toastAction.style.display = 'flex';
+            primaryBtn.textContent = 'Check Archive';
+            primaryBtn.onclick = () => {
+              this.createTab('https://web.archive.org/web/*/' + e.validatedURL);
+              window.toastManager.hide();
+            };
+            secondaryBtn.textContent = 'Dismiss';
+            secondaryBtn.onclick = () => {
+              window.toastManager.hide();
+            };
+          }
+        }
+      }
+
       // Only show offline page for main frame failures that aren't about-blank
       if (e.isMainFrame && e.validatedURL !== 'about:blank') {
         const path = window.require('path');
@@ -1313,6 +1568,7 @@ class TabManager {
     else if (tab.url === 'settings') tab.tabTitle.textContent = 'Settings';
     else if (tab.url === 'changelog') tab.tabTitle.textContent = "What's New";
     else if (tab.url === 'flags') tab.tabTitle.textContent = "Leef Labs";
+    else if (tab.url === 'privacy') tab.tabTitle.textContent = "Privacy Center";
     else {
       let displayTitle = tab.title || 'Loading...';
       if (this.settings.currentSettings.blockAIOverview) {
@@ -1328,7 +1584,7 @@ class TabManager {
       if (!tab.isInternal) {
         // Strip -noai from the address bar for a seamless display
         let displayUrl = tab.url;
-        
+
         // Handle Offline Page URL Spoofing (v0.2.1)
         if (displayUrl.startsWith('file://') && displayUrl.includes('offline.html')) {
           try {
@@ -1357,6 +1613,7 @@ class TabManager {
         else if (tab.url === 'changelog') icon = '📜';
         else if (tab.url === 'credits') icon = '💎';
         else if (tab.url === 'flags') icon = '🧪';
+        else if (tab.url === 'privacy') icon = '🛡️';
         tab.faviconEl.textContent = icon;
         tab.faviconEl.style.backgroundImage = 'none';
       } else {
@@ -1388,7 +1645,15 @@ class TabManager {
     const tab = this.getActiveTab();
     if (!tab) return;
 
-    // Only suspend the previously active tab (not all tabs — avoids O(n) executeJavaScript calls because that one tester kept doing it)
+    // Wake up from hibernation (Labs)
+    if (tab.isHibernated && tab.hibernateUrl) {
+      console.log(`Leef Labs: Waking up tab ${tab.id}`);
+      tab.isHibernated = false;
+      tab.webviewEl.src = tab.hibernateUrl;
+      tab.hibernateUrl = null;
+    }
+
+    // Only suspend the previously active tab
     if (prevTabId && prevTabId !== tabId && this.settings.currentSettings.backgroundLimit) {
       const prevTab = this.tabs.find(t => t.id === prevTabId);
       if (prevTab && prevTab.webviewEl) {
@@ -1399,6 +1664,11 @@ class TabManager {
               if (!m.paused) { m.pause(); m.dataset.wasPlayingByLeef = "true"; }
             });
           `);
+          
+          // Resource Freezer (Labs): Record time backgrounded
+          if (window.labsManager && window.labsManager.isFlagEnabled('resource_freezer')) {
+            prevTab.lastActiveTime = Date.now();
+          }
         } catch (e) { }
       }
     }
@@ -1437,6 +1707,8 @@ class TabManager {
 
     const labsView = document.getElementById('flags-view');
     if (labsView) labsView.style.display = tab.url === 'flags' ? 'flex' : 'none';
+    const privacyView = document.getElementById('privacy-view');
+    if (privacyView) privacyView.style.display = tab.url === 'privacy' ? 'flex' : 'none';
 
     if (tab.isInternal) {
       UI.views.webviewsContainer.classList.remove('active');
@@ -1444,6 +1716,9 @@ class TabManager {
       UI.views.webviewsContainer.classList.add('active');
       if (tab.webviewEl) tab.webviewEl.classList.add('active');
     }
+
+    const drmIndicator = document.getElementById('drm-indicator');
+    if (drmIndicator) drmIndicator.style.display = tab.hasDRM ? 'flex' : 'none';
 
     this.updateTabUI(tab);
   }
@@ -1470,6 +1745,28 @@ class TabManager {
     } else if (this.activeTabId === tabId) {
       this.switchTab(this.tabs[Math.max(0, index - 1)].id);
     }
+
+    // Recently Closed Tabs (v0.3.2)
+    if (!tab.isInternal && tab.url && !tab.url.startsWith('file://')) {
+      if (!this.closedTabsStack) this.closedTabsStack = [];
+      this.closedTabsStack.push({ url: tab.url, title: tab.title });
+      if (this.closedTabsStack.length > 20) this.closedTabsStack.shift(); // Limit size
+
+      // Tell main process that we have closed tabs now
+      try {
+        window.require('electron').ipcRenderer.send('update-closed-tabs-count', this.closedTabsStack.length);
+      } catch (e) { }
+    }
+  }
+
+  reopenLastClosedTab() {
+    if (!this.closedTabsStack || this.closedTabsStack.length === 0) return;
+    const last = this.closedTabsStack.pop();
+    this.createTab(last.url);
+
+    try {
+      window.require('electron').ipcRenderer.send('update-closed-tabs-count', this.closedTabsStack.length);
+    } catch (e) { }
   }
 
   bindGlobalEvents() {
@@ -1549,11 +1846,22 @@ class TabManager {
             break;
         }
       });
+
+      window.require('electron').ipcRenderer.on('reopen-closed-tab', () => {
+        this.reopenLastClosedTab();
+      });
     } catch (e) { }
 
     // Global context menu for non-webview areas (Home, Settings, etc.)
     window.addEventListener('contextmenu', (e) => {
       if (e.target.tagName === 'WEBVIEW') return;
+
+      // Tab Bar Background Context Menu (v0.3.2)
+      if (e.target.id === 'tabs-container' || e.target.classList.contains('tabs-row')) {
+        e.preventDefault();
+        window.require('electron').ipcRenderer.send('show-tab-context-menu', { tabId: null });
+        return;
+      }
 
       const params = {
         x: e.x,
@@ -1601,6 +1909,12 @@ class TabManager {
           tab.blockedAds = (tab.blockedAds || 0) + 1;
           if (this.activeTabId === tab.id && window.siteIdentityManager) {
             window.siteIdentityManager.updateUI();
+          }
+          if (window.privacyManager) {
+            try {
+              const domain = new URL(data.url).hostname;
+              window.privacyManager.recordBlock(domain);
+            } catch (e) { }
           }
         }
       });
@@ -1747,7 +2061,7 @@ class DownloadManager {
           dl.received = data.received;
           if (data.total) dl.total = data.total;
           if (data.state) dl.state = data.state;
-          
+
           if (dl.status === 'paused') {
             dl.status = 'progressing';
             this.renderItem(id);
@@ -1815,10 +2129,10 @@ class DownloadManager {
     const displayName = BrowserUtils.sanitize(dl.name || 'Downloading...');
 
     let statusText = isDone ? 'Finished' : (isCancelled ? 'Cancelled' : (isFailed ? 'Failed' : (isPaused ? 'Paused' : progress + '%')));
-    
+
     let errorHTML = '';
     if (isFailed && !isCancelled) {
-        errorHTML = `<div style="color: #d32f2f; font-size: 0.75rem; text-align: center; margin-bottom: 4px;">Download failed. Check storage or network.</div>`;
+      errorHTML = `<div style="color: #d32f2f; font-size: 0.75rem; text-align: center; margin-bottom: 4px;">Download failed. Check storage or network.</div>`;
     }
 
     itemEl.innerHTML = `
@@ -1884,18 +2198,18 @@ class DownloadManager {
     const now = Date.now();
     const lastTime = dl.lastTime || dl.startTime || now;
     const lastReceived = dl.lastReceived || 0;
-    
+
     // Calculate speed (bytes per second)
     const timeDiff = (now - lastTime) / 1000; // seconds
     if (timeDiff >= 0.5) { // Update speed every 0.5s
       const bytesDiff = dl.received - lastReceived;
       const bps = bytesDiff / timeDiff;
-      
+
       const itemNode = document.getElementById(`dl-${id}`);
       const speedEl = itemNode ? itemNode.querySelector('.dl-speed-info') : null;
       if (speedEl) speedEl.textContent = this.formatBytes(bps) + '/s';
 
-      
+
       dl.lastTime = now;
       dl.lastReceived = dl.received;
     }
@@ -1909,7 +2223,7 @@ class DownloadManager {
     if (pb) pb.style.width = progress + '%';
     if (percent) percent.textContent = progress + '%';
     if (sizeEl) sizeEl.textContent = `${this.formatBytes(dl.received)} / ${this.formatBytes(dl.total)}`;
-    
+
     this.updateToolbarProgress();
   }
 
@@ -2183,6 +2497,30 @@ class SiteIdentityManager {
         } catch (e) { }
       });
     }
+
+    const btnDashboard = document.getElementById('btn-si-dashboard');
+    if (btnDashboard) {
+      btnDashboard.addEventListener('click', () => {
+        this.dropdown.style.display = 'none';
+        if (window.tabManager) {
+          window.tabManager.createTab('privacy');
+        }
+      });
+    }
+
+    const btnWhois = document.getElementById('btn-si-whois');
+    if (btnWhois) {
+      btnWhois.addEventListener('click', () => {
+        this.dropdown.style.display = 'none';
+        const tab = window.tabManager.getActiveTab();
+        if (tab && !tab.isInternal) {
+          try {
+            const domain = new URL(tab.url).hostname;
+            window.tabManager.createTab(`https://who.is/whois/${domain}`);
+          } catch (e) { }
+        }
+      });
+    }
   }
 
   updateUI() {
@@ -2257,22 +2595,63 @@ class LabsManager {
       });
     }
 
-    // Bind individual flags
-    const chkSafe = document.getElementById('flag-force-safe-off');
-    if (chkSafe) {
-      chkSafe.addEventListener('change', (e) => {
-        this.flags.force_safe_off = e.target.checked;
-        this.saveFlags();
+    const btnOpenPrivacy = document.getElementById('btn-open-privacy-lab');
+    if (btnOpenPrivacy) {
+      btnOpenPrivacy.addEventListener('click', () => {
+        if (window.tabManager) window.tabManager.createTab('privacy');
       });
     }
+
+    // Bind individual flags
+    const bindFlag = (id, key) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.checked = !!this.flags[key];
+        el.addEventListener('change', (e) => {
+          this.flags[key] = e.target.checked;
+          this.saveFlags();
+          // Force apply settings so main process sees the change (e.g. for Stealth UA)
+          if (window.settingsManager) window.settingsManager.saveSettings();
+        });
+      }
+    };
+
+    const chkMaster = document.getElementById('flag-fingerprint-master');
+    const subContainer = document.getElementById('fingerprint-sub-options');
+    if (chkMaster) {
+      chkMaster.checked = !!this.flags.fingerprint_master;
+      if (subContainer) subContainer.style.display = chkMaster.checked ? 'block' : 'none';
+      
+      chkMaster.addEventListener('change', (e) => {
+        this.flags.fingerprint_master = e.target.checked;
+        if (subContainer) subContainer.style.display = e.target.checked ? 'block' : 'none';
+        this.saveFlags();
+        if (window.settingsManager) window.settingsManager.saveSettings();
+      });
+    }
+
+    bindFlag('flag-force-safe-off', 'force_safe_off');
+    bindFlag('flag-ghost-mode', 'ghost_mode');
+    bindFlag('flag-resource-freezer', 'resource_freezer');
+    bindFlag('flag-wayback-suggest', 'wayback_suggest');
+    bindFlag('flag-stealth-ua', 'stealth_ua');
+    bindFlag('flag-audio-scrambler', 'audio_scrambler');
+    bindFlag('flag-hardware-cloak', 'hardware_cloak');
+    bindFlag('flag-timezone-spoof', 'timezone_spoof');
+    bindFlag('flag-font-mask', 'font_mask');
+    bindFlag('flag-dnt-header', 'dnt_header');
+    bindFlag('flag-yt-warp-speed', 'yt_warp_speed');
   }
 
   syncUI() {
-    const chkSafe = document.getElementById('flag-force-safe-off');
-    if (chkSafe) chkSafe.checked = !!this.flags.force_safe_off;
+    // Handled by bindFlag in current implementation
   }
 
   isFlagEnabled(key) {
+    const fingerprintFlags = ['ghost_mode', 'stealth_ua', 'audio_scrambler', 'hardware_cloak', 'timezone_spoof', 'font_mask', 'dnt_header'];
+    if (fingerprintFlags.includes(key)) {
+      return !!(this.flags.fingerprint_master && this.flags[key]);
+    }
     return !!this.flags[key];
   }
 }
@@ -2605,6 +2984,195 @@ class PermissionManager {
   }
 }
 
+class PrivacyManager {
+  constructor(settingsManager) {
+    this.settingsManager = settingsManager;
+    this.totalBlocked = parseInt(localStorage.getItem('leef_privacy_total_blocked') || '0');
+    this.totalRequests = parseInt(localStorage.getItem('leef_privacy_total_requests') || '0');
+    this.secureRequests = parseInt(localStorage.getItem('leef_privacy_secure_requests') || '0');
+    this.recentBlocks = []; // { domain: string, time: number }
+
+    this.view = document.getElementById('privacy-view');
+    this.disabledState = document.getElementById('privacy-disabled-state');
+    this.enabledState = document.getElementById('privacy-enabled-state');
+    
+    this.elTotal = document.getElementById('stat-total-blocked');
+    this.elSecure = document.getElementById('stat-secure-percent');
+    this.elRecentList = document.getElementById('privacy-recent-list');
+
+    this.btnBack = document.getElementById('btn-privacy-back');
+    this.btnEnableBlocker = document.getElementById('btn-privacy-enable-blocker');
+
+    this.bindEvents();
+    this.updateUI();
+  }
+
+  bindEvents() {
+    if (this.btnBack) {
+      this.btnBack.addEventListener('click', () => {
+        if (window.tabManager) window.tabManager.createTab('flags');
+      });
+    }
+
+    if (this.btnEnableBlocker) {
+      this.btnEnableBlocker.addEventListener('click', () => {
+        if (window.tabManager) {
+          window.tabManager.createTab('settings');
+          const item = document.querySelector('.settings-nav li[data-section="sec-privacy"]');
+          if (item) item.click();
+        }
+      });
+    }
+  }
+
+  recordBlock(domain) {
+    this.totalBlocked++;
+    this.recentBlocks.unshift({ domain, time: Date.now() });
+    if (this.recentBlocks.length > 30) this.recentBlocks.pop();
+    
+    localStorage.setItem('leef_privacy_total_blocked', this.totalBlocked);
+    this.updateUI();
+  }
+
+  recordRequest(isSecure) {
+    this.totalRequests++;
+    if (isSecure) this.secureRequests++;
+    
+    localStorage.setItem('leef_privacy_total_requests', this.totalRequests);
+    localStorage.setItem('leef_privacy_secure_requests', this.secureRequests);
+    
+    if (this.totalRequests % 5 === 0) this.updateUI(); // Throttled UI update
+  }
+
+  updateUI() {
+    const isBlockerEnabled = this.settingsManager.currentSettings.adBlockerMode !== 'none';
+    
+    if (this.disabledState && this.enabledState) {
+      this.disabledState.style.display = isBlockerEnabled ? 'none' : 'block';
+      this.enabledState.style.display = isBlockerEnabled ? 'block' : 'none';
+    }
+
+    if (this.elTotal) this.elTotal.textContent = this.totalBlocked.toLocaleString();
+    if (this.elSecure) {
+      const pct = this.totalRequests > 0 ? Math.round((this.secureRequests / this.totalRequests) * 100) : 100;
+      this.elSecure.textContent = pct + '%';
+    }
+
+    if (this.elRecentList && isBlockerEnabled) {
+      if (this.recentBlocks.length === 0) {
+        this.elRecentList.innerHTML = '<p style="opacity:0.5; font-size:0.9rem; padding: 20px; text-align: center;">Start browsing to see protection in action.</p>';
+      } else {
+        this.elRecentList.innerHTML = this.recentBlocks.slice(0, 10).map(b => `
+          <div class="privacy-recent-item">
+            <span style="font-weight:500;">${BrowserUtils.sanitize(b.domain)}</span>
+            <span style="opacity:0.5; font-size:0.75rem;">${new Date(b.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+          </div>
+        `).join('');
+      }
+    }
+  }
+}
+
+class FindManager {
+  constructor() {
+    this.el = document.getElementById('find-bar');
+    this.input = document.getElementById('find-input');
+    this.resultsEl = document.getElementById('find-results');
+    this.btnPrev = document.getElementById('btn-find-prev');
+    this.btnNext = document.getElementById('btn-find-next');
+    this.btnClose = document.getElementById('btn-find-close');
+
+    this.activeRequestId = null;
+    this.bindEvents();
+  }
+
+  bindEvents() {
+    window.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        this.show();
+      }
+      if (e.key === 'Escape' && this.el.style.display !== 'none') {
+        this.hide();
+      }
+    });
+
+    this.input.addEventListener('input', () => {
+      this.startFind(this.input.value, true, false); // New search session
+    });
+
+    this.input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        if (e.shiftKey) this.findPrev();
+        else this.findNext();
+      }
+    });
+
+    this.btnPrev.addEventListener('click', () => this.findPrev());
+    this.btnNext.addEventListener('click', () => this.findNext());
+    this.btnClose.addEventListener('click', () => this.hide());
+
+    window.require('electron').ipcRenderer.on('trigger-find-in-page', () => {
+      this.show();
+    });
+
+    // found-in-page event is fired on the webview itself.
+    // We need to listen to all webviews or the active one.
+  }
+
+  // This will be called by TabManager when a webview is mounted
+  attachToWebview(webview) {
+    webview.addEventListener('found-in-page', (e) => {
+      const result = e.result;
+      this.resultsEl.textContent = `${result.activeMatchOrdinal}/${result.matches}`;
+      if (result.matches === 0) this.resultsEl.style.color = '#f44336';
+      else this.resultsEl.style.color = 'var(--primary-color)';
+    });
+  }
+
+  show() {
+    this.el.style.display = 'block';
+    this.input.focus();
+    this.input.select();
+    if (this.input.value) this.startFind(this.input.value, true);
+  }
+
+  hide() {
+    this.el.style.display = 'none';
+    const tab = window.tabManager.getActiveTab();
+    if (tab && tab.webviewEl) {
+      tab.webviewEl.stopFindInPage('clearSelection');
+    }
+    this.resultsEl.textContent = '0/0';
+  }
+
+  startFind(text, forward, findNext = false) {
+    if (!text) {
+      const tab = window.tabManager.getActiveTab();
+      if (tab && tab.webviewEl) tab.webviewEl.stopFindInPage('clearSelection');
+      this.resultsEl.textContent = '0/0';
+      return;
+    }
+    const tab = window.tabManager.getActiveTab();
+    if (tab && tab.webviewEl) {
+      this.activeRequestId = tab.webviewEl.findInPage(text, { forward, findNext });
+    } else {
+      // Internal page fallback
+      const found = window.find(text, false, !forward, true);
+      this.resultsEl.textContent = found ? 'Found' : '0/0';
+      this.resultsEl.style.color = found ? 'var(--primary-color)' : '#f44336';
+    }
+  }
+
+  findNext() {
+    if (this.input.value) this.startFind(this.input.value, true, true);
+  }
+
+  findPrev() {
+    if (this.input.value) this.startFind(this.input.value, false, true);
+  }
+}
+
 // --- BOOTSTRAP ---
 window.onload = () => {
   // ToastManager must be first so all other managers can use it
@@ -2696,6 +3264,12 @@ window.onload = () => {
 
   // Hero Section (Clock/Greeting)
   window.heroManager = new HeroManager();
+
+  // Find in Page
+  window.findManager = new FindManager();
+
+  // Privacy Manager
+  window.privacyManager = new PrivacyManager(settingsMgr);
 
   // Quick Settings Menu
   window.quickSettingsManager = new QuickSettingsManager();

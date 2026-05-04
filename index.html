@@ -54,6 +54,13 @@
             <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
           </svg>
         </button>
+
+        <div id="drm-indicator" class="drm-indicator" style="display: none;" title="Protected DRM Content (Widevine) Active">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"></path>
+          </svg>
+          <span>DRM</span>
+        </div>
         <div id="site-identity-dropdown" class="site-identity-dropdown" style="display: none;">
           <div class="si-header">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
@@ -80,6 +87,23 @@
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
               </svg>
               Clear Site Cookies
+            </button>
+          </div>
+          <div class="si-section" style="padding-top: 0; border-top: none;">
+            <button id="btn-si-whois" class="si-btn-link">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                <line x1="11" y1="8" x2="11" y2="14"></line>
+                <line x1="8" y1="11" x2="14" y2="11"></line>
+              </svg>
+              Lookup WHOIS Info
+            </button>
+            <button id="btn-si-dashboard" class="si-btn-link">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              </svg>
+              View Privacy Dashboard
             </button>
           </div>
         </div>
@@ -198,6 +222,36 @@
       <!-- Tabs will be injected here -->
       <button class="new-tab-btn" id="btn-new-tab">+</button>
     </div>
+
+    <!-- Find in Page Bar -->
+    <div id="find-bar" class="find-bar" style="display: none;">
+      <div class="find-bar-content">
+        <svg class="find-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="find-input" placeholder="Find in page..." spellcheck="false" autocomplete="off">
+        <div id="find-results" class="find-results">0/0</div>
+        <div class="find-divider"></div>
+        <button id="btn-find-prev" class="find-nav-btn" title="Previous (Shift+Enter)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+            <polyline points="18 15 12 9 6 15"></polyline>
+          </svg>
+        </button>
+        <button id="btn-find-next" class="find-nav-btn" title="Next (Enter)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+        <button id="btn-find-close" class="find-nav-btn find-close-btn" title="Close (Esc)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
   </div>
 
   <div class="main-content">
@@ -265,6 +319,18 @@
       <div class="changelog-content">
         <h1>What's New in Leef</h1>
         <p class="changelog-subtitle">Discover the latest updates and improvements</p>
+        <div class="update-card">
+          <div class="update-date">May 4, 2026</div>
+          <h2>Privacy Suite (v0.4.0)</h2>
+          <ul>
+            <li>Added new features to Leef Labs</li>
+            <li>Added WHOIS lookup to Site Identity</li>
+            <li>Disabled automatic background tab pausing</li>
+            <li>Improved Wayback Machine integration</li>
+            <li>General stability and performance fixes</li>
+          </ul>
+        </div>
+
         <div class="update-card">
           <div class="update-date">May 3, 2026</div>
           <h2>(v0.3.0)</h2>
@@ -721,6 +787,12 @@
               style="display: none; margin-top: 15px; background: rgba(0,0,0,0.05); color: #333; width: auto; font-size: 0.85rem;">Refresh
               Engine & Lists</button>
           </div>
+
+          <div class="setting-group">
+            <h3>Privacy Dashboard</h3>
+            <p style="margin-bottom: 12px;">View detailed analytics and recent protection activity.</p>
+            <button class="settings-btn" id="btn-open-privacy-settings" style="width: auto; background: var(--primary-color); color: white; border: none;">Open Privacy Dashboard</button>
+          </div>
           <div class="setting-group toggle-group">
             <div>
               <h3>Block Google AI Overview <span class="beta-tag">BETA</span></h3>
@@ -798,6 +870,7 @@
           </div>
         </div>
 
+
         <!-- Advanced -->
         <div class="settings-section" id="sec-advanced">
           <h1>Advanced</h1>
@@ -838,11 +911,72 @@
       </div>
     </div>
 
+
+    <!-- Privacy Dashboard View (External Lab) -->
+    <div class="privacy-layout" id="privacy-view" style="display: none;">
+      <div class="privacy-content">
+        <div class="privacy-header">
+          <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
+            <h1 style="font-family: var(--font-display); font-size: 2.5rem; color: var(--primary-color);">Privacy Analytics
+            </h1>
+          </div>
+          <p class="flags-subtitle">A live look at how Leef is protecting your privacy.</p>
+        </div>
+
+        <!-- State: Blocker Disabled -->
+        <div id="privacy-disabled-state"
+          style="display: none; text-align: center; padding: 40px 20px; background: white; border-radius: 20px; border: 1px solid rgba(0,0,0,0.05); box-shadow: 0 4px 20px rgba(0,0,0,0.02);">
+          <div style="font-size: 4rem; margin-bottom: 20px;">🛡️</div>
+          <h2 style="margin-bottom: 10px;">Ad Blocking is Disabled</h2>
+          <p style="color: #666; margin-bottom: 25px; max-width: 400px; margin-inline: auto;">To see how well Leef protects
+            you from ads and trackers, you first need to enable the blocker in your settings.</p>
+          <button id="btn-privacy-enable-blocker" class="settings-btn"
+            style="background: var(--primary-color); color: white; border: none; padding: 12px 24px; font-weight: 600;">Open
+            Protection Settings</button>
+        </div>
+
+        <!-- State: Blocker Enabled -->
+        <div id="privacy-enabled-state">
+          <div class="privacy-stats-grid">
+            <div class="privacy-stat-card">
+              <div class="stat-value" id="stat-total-blocked">0</div>
+              <div class="stat-label">Ads & Trackers Blocked</div>
+              <div class="stat-desc">Since you started using Leef</div>
+            </div>
+            <div class="privacy-stat-card">
+              <div class="stat-value" id="stat-secure-percent">100%</div>
+              <div class="stat-label">HTTPS Connections</div>
+              <div class="stat-desc">Secure vs Unsecured browsing</div>
+            </div>
+          </div>
+
+          <div class="privacy-section" style="margin-top: 30px;">
+            <h3 style="margin-bottom: 15px; font-weight: 600;">Protection activity from this session</h3>
+            <div id="privacy-recent-list" class="privacy-recent-list">
+              <p style="opacity:0.5; font-size:0.9rem; padding: 15px; text-align: center;">Start browsing to see protection
+                in action.</p>
+            </div>
+          </div>
+
+          <div class="privacy-info-card"
+            style="margin-top: 40px; background: rgba(255,255,255,0.6); border: 1px solid rgba(0,0,0,0.05);">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            <div>
+              <h4>Your data is your business.</h4>
+              <p>Leef Labs Privacy Analytics is built to give you transparency. Everything shown here is stored 100%
+                locally on your machine.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Webviews Container -->
     <div class="webview-container" id="webviews-container">
       <!-- Webviews will be injected here -->
     </div>
-
   </div>
 
   <!-- Toast Notification -->
@@ -856,7 +990,7 @@
         <button id="btn-toast-primary" class="settings-btn"
           style="flex: 1; padding: 6px 12px; font-size: 0.8rem; background: var(--primary-color); color: white; border: none; pointer-events: auto; cursor: pointer; border-radius: 6px;">Action</button>
         <button id="btn-toast-secondary" class="settings-btn"
-          style="flex: 1; padding: 6px 12px; font-size: 0.8rem; background: rgba(0,0,0,0.06); color: #333; border: none; pointer-events: auto; cursor: pointer; border-radius: 6px;">Secondary</button>
+          style="flex: 1; padding: 6px 12px; font-size: 0.8rem; background: rgba(0,0,0,0.06); color: #333; border: none; pointer-events: auto; cursor: pointer; border-radius: 6px;">Dismiss</button>
       </div>
     </div>
     <button class="leef-toast-close" id="leef-toast-close" style="pointer-events: auto;">×</button>
@@ -936,12 +1070,110 @@
         <p class="flags-subtitle">Experimental features currently in testing. Use with caution.</p>
       </div>
 
+      <div class="flag-card master-flag-card">
+        <div class="flag-info">
+          <h3>Fingerprinting Protection</h3>
+          <p>Enable a suite of experimental tools to mask your browser's unique digital identity.</p>
+        </div>
+        <label class="switch"><input type="checkbox" id="flag-fingerprint-master"><span class="slider"></span></label>
+      </div>
+
+      <div id="fingerprint-sub-options" style="display: none; margin-left: 20px; border-left: 2px solid var(--primary-color); padding-left: 15px; margin-top: -10px; margin-bottom: 20px;">
+        <div class="flag-card">
+          <div class="flag-info">
+            <h3>Ghost Mode</h3>
+            <p>Inject subtle, random noise into HTML5 Canvas readouts.</p>
+          </div>
+          <label class="switch"><input type="checkbox" id="flag-ghost-mode"><span class="slider"></span></label>
+        </div>
+
+        <div class="flag-card">
+          <div class="flag-info">
+            <h3>Stealth User Agent</h3>
+            <p>Remove "LeefBrowser" from your browser identifier string. <span class="warning-text">⚠️ May cause "Unsupported Browser" errors on some sites.</span></p>
+          </div>
+          <label class="switch"><input type="checkbox" id="flag-stealth-ua"><span class="slider"></span></label>
+        </div>
+
+        <div class="flag-card">
+          <div class="flag-info">
+            <h3>Audio Scrambler</h3>
+            <p>Randomize AudioContext. <span class="warning-text">⚠️ May cause slight crackling in high-fidelity web apps.</span></p>
+          </div>
+          <label class="switch"><input type="checkbox" id="flag-audio-scrambler"><span class="slider"></span></label>
+        </div>
+
+        <div class="flag-card">
+          <div class="flag-info">
+            <h3>Hardware Cloak</h3>
+            <p>Spoof RAM, CPU, and WebGL. <span class="warning-text">⚠️ May reduce performance in WebGL games.</span></p>
+          </div>
+          <label class="switch"><input type="checkbox" id="flag-hardware-cloak"><span class="slider"></span></label>
+        </div>
+
+        <div class="flag-card">
+          <div class="flag-info">
+            <h3>Timezone Spoof (UTC)</h3>
+            <p>Force UTC/GMT+0 reporting. <span class="warning-text">⚠️ Will cause offsets in web calendars and local times.</span></p>
+          </div>
+          <label class="switch"><input type="checkbox" id="flag-timezone-spoof"><span class="slider"></span></label>
+        </div>
+
+        <div class="flag-card">
+          <div class="flag-info">
+            <h3>Font Masking</h3>
+            <p>Inhibit font enumeration. <span class="warning-text">⚠️ May break some custom icons or cause layout shifts.</span></p>
+          </div>
+          <label class="switch"><input type="checkbox" id="flag-font-mask"><span class="slider"></span></label>
+        </div>
+
+        <div class="flag-card">
+          <div class="flag-info">
+            <h3>DNT Header</h3>
+            <p>Send "Do Not Track" signal. <span class="warning-text">⚠️ Some sites may react unexpectedly to this header.</span></p>
+          </div>
+          <label class="switch"><input type="checkbox" id="flag-dnt-header"><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="flag-card">
+        <div class="flag-info">
+          <h3>Resource Freezer</h3>
+          <p>Automatically hibernate tabs inactive for more than 5 minutes to drastically reduce RAM usage.</p>
+        </div>
+        <label class="switch"><input type="checkbox" id="flag-resource-freezer"><span class="slider"></span></label>
+      </div>
+
+      <div class="flag-card">
+        <div class="flag-info">
+          <h3>Wayback Machine Suggest</h3>
+          <p>Automatically suggest viewing an archived version of a page if it fails to load or returns a 404 error.</p>
+        </div>
+        <label class="switch"><input type="checkbox" id="flag-wayback-suggest"><span class="slider"></span></label>
+      </div>
+
       <div class="flag-card">
         <div class="flag-info">
           <h3>Region Independence</h3>
           <p>Force-strips SafeSearch enforcement parameters and headers. Resolve locks in regions like the UK.</p>
         </div>
         <label class="switch"><input type="checkbox" id="flag-force-safe-off"><span class="slider"></span></label>
+      </div>
+
+      <div class="flag-card">
+        <div class="flag-info">
+          <h3>YouTube Warp Speed</h3>
+          <p>Force unskippable ads to play at 16x speed. <span class="warning-text">⚠️ May cause a 5-10s delay before some videos start.</span></p>
+        </div>
+        <label class="switch"><input type="checkbox" id="flag-yt-warp-speed"><span class="slider"></span></label>
+      </div>
+
+      <div class="flag-card">
+        <div class="flag-info">
+          <h3>Privacy Analytics</h3>
+          <p>Access a live look at how Leef is protecting you from trackers and ads.</p>
+        </div>
+        <button id="btn-open-privacy-lab" class="settings-btn" style="width: auto; background: var(--primary-color); color: white; border: none;">Open Dashboard</button>
       </div>
 
       <div class="flag-card">
