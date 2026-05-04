@@ -1248,11 +1248,19 @@ class TabManager {
       // Ignore code -3 (ABORTED) which happens on normal navigation/refresh
       if (e.errorCode === -3) return;
       
+      // CRITICAL: Prevent infinite loop if offline.html itself fails to load
+      if (e.validatedURL.includes('offline.html')) {
+        console.error('CRITICAL: offline.html failed to load. Stopping recursion.');
+        return;
+      }
+      
       console.warn('Navigation failed:', e.validatedURL, e.errorDescription);
       
       // Only show offline page for main frame failures that aren't about-blank
       if (e.isMainFrame && e.validatedURL !== 'about:blank') {
-        const offlinePath = `file://${window.require('path').join(__dirname, 'offline.html')}?url=${encodeURIComponent(e.validatedURL)}&code=${e.errorCode}&desc=${encodeURIComponent(e.errorDescription)}`;
+        const path = window.require('path');
+        const offlineFile = path.join(window.require('electron').remote ? window.require('electron').remote.app.getAppPath() : __dirname, 'offline.html');
+        const offlinePath = `file:///${offlineFile.replace(/\\/g, '/')}?url=${encodeURIComponent(e.validatedURL)}&code=${e.errorCode}&desc=${encodeURIComponent(e.errorDescription)}`;
         tab.webviewEl.loadURL(offlinePath);
       }
     });
@@ -1602,7 +1610,9 @@ class TabManager {
     window.require('electron').ipcRenderer.on('trigger-offline-game', () => {
       const tab = this.getActiveTab();
       if (tab) {
-        const offlinePath = `file://${window.require('path').join(__dirname, 'offline.html')}?url=${encodeURIComponent(tab.url || 'https://google.com')}`;
+        const path = window.require('path');
+        const offlineFile = path.join(window.require('electron').remote ? window.require('electron').remote.app.getAppPath() : __dirname, 'offline.html');
+        const offlinePath = `file:///${offlineFile.replace(/\\/g, '/')}?url=${encodeURIComponent(tab.url || 'https://google.com')}`;
         if (!tab.webviewEl) this.mountWebview(tab);
         tab.isInternal = false;
         tab.webviewEl.loadURL(offlinePath);

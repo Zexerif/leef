@@ -35,6 +35,14 @@ app.commandLine.appendSwitch('disable-gpu-driver-bug-workarounds');
 const isDev = !app.isPackaged || process.env.NODE_ENV === 'development';
 console.log('Leef Browser: isDev =', isDev, '| app.isPackaged =', app.isPackaged);
 
+// DATA ISOLATION: Prevent dev data from mixing with prod data
+if (isDev) {
+  const devPath = path.join(app.getPath('userData'), '..', 'Leef-Dev');
+  app.setPath('userData', devPath);
+  console.log('Dev Mode: Data isolated to', devPath);
+}
+
+
 
 
 let mainWindow;
